@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+from typing import List
+
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
+
+from config import SETTINGS
+from config.settings import load_settings
+from web.service import get_web_chat_settings, update_web_chat_settings
+
+from .auth import (
+    COOKIE_NAME,
+    clear_auth_cookie,
+    create_session,
+    delete_session,
+    is_authenticated,
+    require_admin,
+    set_auth_cookie,
+)
+from .html import dashboard_page_html, login_page_html
+from .service import (
+    FAQ_COLLECTION,
+    PENDING_COLLECTION_NAME,
+    approve_pending_knowledge_point,
+    batch_create_knowledge,
+    batch_delete_knowledge_points,
+    create_knowledge_point,
+    delete_knowledge_point,
+    get_app_api_settings,
+    get_qa_prompt_template,
+    import_batch_knowledge,
+    list_knowledge_points,
+    preview_batch_knowledge,
+    update_app_api_settings,
+    update_qa_prompt_template,
+)
+
+
+router = APIRouter()
+
+
+class AdminLoginRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+
+
+class AdminCreateKnowledgeRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    answer: str = Field(..., min_length=1)
+
+
+class AdminBatchImportRequest(BaseModel):
+    content: str = Field(..., min_length=1)
+
+
+class AdminBatchDeleteRequest(BaseModel):
+    ids: List[str] = Field(default_factory=list)
+
+
+class AdminBatchPreviewRequest(BaseModel):
+    content: str = Field(default="")
+    file_name: str = Field(default="")
+    file_content_base64: str = Field(default="")
+    max_preview: int = Field(default=20, ge=1, le=200)
+
+
+class AdminBatchImportEntry(BaseModel):
+    question: str = Field(..., min_length=1)
+    answer: str = Field(..., min_length=1)
+
+
+class AdminBatchImportConfirmRequest(BaseModel):
+    entries: List[AdminBatchImportEntry] = Field(default_factory=list)
+    rollback_on_error: bool = Field(default=True)
+
+
+class AdminApiSettingsRequest(BaseModel):
+    similarity_threshold: float = Field(..., ge=0, le=1)
+    min_embedding_chars: int = Field(..., ge=1)
+    not_configured_answer: str = Field(..., min_length=1)
+    auto_retrieve_knowledge: bool = Field(...)
+    enable_qa_model: bool = Field(...)
+    auto_cache_qa_answer: bool = Field(...)
+
+
+class AdminQaTemplateRequest(BaseModel):
+    qa_prompt_template: str = Field(..., min_length=1)
+
+
+class AdminWebChatSettingsRequest(BaseModel):
+    enabled: bool = Field(...)
+    chat_title: str = Field(..., min_length=1)
+    welcome_template: str = Field(default="")
+    quick_phrases: List[str] = Field(default_factory=list)
+
+
+@router.get("/admin", response_class=HTMLResponse)
+def admin_home(request: Request):
+    if is_authenticated(request):
+        runtime = load_settings()
+        return HTMLResponse(
+            dashboard_page_html(
+                min_embedding_chars=runtime.min_embedding_chars,
+                similarity_threshold=runtime.similarity_threshold,
+                not_configured_answer=runtime.not_configured_answer,
+                faq_collection=runtime.qdrant_collection,
+                pending_collection=runtime.qdrant_pending_collection,
+            )
+        )
+    return HTMLResponse(login_page_html())
+
+
+@router.post("/admin/login")
+def admin_login(payload: AdminLoginRequest):
+    if payload.password.strip() != SETTINGS.admin_password:
+        return JSONResponse(status_code=401, content={"detail": "密码错误"})
+
+    token, ttl = create_session()
+    response = JSONResponse(content={"logged_in": True})
+    set_auth_cookie(response, token, ttl)
+    return response
+
+
+@router.post("/admin/logout")
+def admin_logout(request: Request):
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if token:
+        delete_session(token)
+    response = JSONResponse(content={"logged_out": True})
+    clear_auth_cookie(response)
+    return response
+
+
+@router.get("/admin/api/knowledge")
+def admin_list_knowledge(
+    request: Request,
+    limit: int = Query(10, ge=1, le=10, description="每页条数"),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    keyword: str = Query("", description="关键字搜索（问题/答案/id）"),
+    collection: str = Query(
+        FAQ_COLLECTION,
+        description=f"集合名（{FAQ_COLLECTION}/{PENDING_COLLECTION_NAME}）",
+    ),
+):
+    require_admin(request)
+    return list_knowledge_points(
+        max_items=limit,
+        keyword=keyword,
+        page=page,
+        collection_name=collection,
+    )
+
+
+@router.post("/admin/api/knowledge")
+def admin_create_knowledge(request: Request, payload: AdminCreateKnowledgeRequest):
+    require_admin(request)
+    return create_knowledge_point(payload.question, payload.answer)
+
+
+@router.delete("/admin/api/knowledge/{point_id}")
+def admin_delete_knowledge(
+    request: Request,
+    point_id: str,
+    collection: str = Query(
+        FAQ_COLLECTION,
+        description=f"集合名（{FAQ_COLLECTION}/{PENDING_COLLECTION_NAME}）",
+    ),
+):
+    require_admin(request)
+    return delete_knowledge_point(point_id, collection_name=collection)
+
+
+@router.post("/admin/api/knowledge/batch")
+def admin_batch_import(request: Request, payload: AdminBatchImportRequest):
+    require_admin(request)
+    return batch_create_knowledge(payload.content, collection_name=FAQ_COLLECTION)
+
+
+@router.post("/admin/api/knowledge/batch/preview")
+def admin_batch_preview(request: Request, payload: AdminBatchPreviewRequest):
+    require_admin(request)
+    return preview_batch_knowledge(
+        content=payload.content,
+        file_name=payload.file_name,
+        file_content_base64=payload.file_content_base64,
+        max_preview=payload.max_preview,
+    )
+
+
+@router.post("/admin/api/knowledge/batch/import")
+def admin_batch_import_confirm(request: Request, payload: AdminBatchImportConfirmRequest):
+    require_admin(request)
+    return import_batch_knowledge(
+        entries=[{"question": entry.question, "answer": entry.answer} for entry in payload.entries],
+        rollback_on_error=payload.rollback_on_error,
+        collection_name=FAQ_COLLECTION,
+    )
+
+
+@router.post("/admin/api/knowledge/batch-delete")
+def admin_batch_delete(
+    request: Request,
+    payload: AdminBatchDeleteRequest,
+    collection: str = Query(
+        FAQ_COLLECTION,
+        description=f"集合名（{FAQ_COLLECTION}/{PENDING_COLLECTION_NAME}）",
+    ),
+):
+    require_admin(request)
+    return batch_delete_knowledge_points(payload.ids, collection_name=collection)
+
+
+@router.post("/admin/api/pending/{point_id}/approve")
+def admin_approve_pending(request: Request, point_id: str):
+    require_admin(request)
+    return approve_pending_knowledge_point(point_id)
+
+
+@router.get("/admin/api/settings/app")
+def admin_get_app_settings(request: Request):
+    require_admin(request)
+    return get_app_api_settings()
+
+
+@router.post("/admin/api/settings/app")
+def admin_update_app_settings(request: Request, payload: AdminApiSettingsRequest):
+    require_admin(request)
+    return update_app_api_settings(
+        similarity_threshold=payload.similarity_threshold,
+        min_embedding_chars=payload.min_embedding_chars,
+        not_configured_answer=payload.not_configured_answer,
+        auto_retrieve_knowledge=payload.auto_retrieve_knowledge,
+        enable_qa_model=payload.enable_qa_model,
+        auto_cache_qa_answer=payload.auto_cache_qa_answer,
+    )
+
+
+@router.get("/admin/api/settings/qa-template")
+def admin_get_qa_template(request: Request):
+    require_admin(request)
+    return get_qa_prompt_template()
+
+
+@router.post("/admin/api/settings/qa-template")
+def admin_update_qa_template(request: Request, payload: AdminQaTemplateRequest):
+    require_admin(request)
+    return update_qa_prompt_template(payload.qa_prompt_template)
+
+
+@router.get("/admin/api/settings/web-chat")
+def admin_get_web_chat_settings(request: Request):
+    require_admin(request)
+    return get_web_chat_settings()
+
+
+@router.post("/admin/api/settings/web-chat")
+def admin_update_web_chat_settings(request: Request, payload: AdminWebChatSettingsRequest):
+    require_admin(request)
+    return update_web_chat_settings(
+        enabled=payload.enabled,
+        chat_title=payload.chat_title,
+        welcome_template=payload.welcome_template,
+        quick_phrases=payload.quick_phrases,
+    )
