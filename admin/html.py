@@ -3,8 +3,23 @@ from __future__ import annotations
 from html import escape
 
 
-def login_page_html() -> str:
-    return """<!doctype html>
+def _normalize_admin_route_prefix(prefix: str) -> str:
+    text = str(prefix or "").strip()
+    if not text:
+        text = "/admin"
+    if not text.startswith("/"):
+        text = f"/{text}"
+    normalized = "/" + text.strip("/")
+    return normalized if normalized != "/" else "/admin"
+
+
+def _apply_admin_prefix(html_text: str, admin_route_prefix: str) -> str:
+    safe_prefix = _normalize_admin_route_prefix(admin_route_prefix)
+    return html_text.replace("/admin", safe_prefix)
+
+
+def login_page_html(admin_route_prefix: str = "/admin") -> str:
+    html_text = """<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -114,6 +129,7 @@ def login_page_html() -> str:
 </body>
 </html>
 """
+    return _apply_admin_prefix(html_text, admin_route_prefix)
 
 
 def _format_float(value: float) -> str:
@@ -128,6 +144,7 @@ def dashboard_page_html(
     faq_collection: str,
     pending_collection: str,
     docs_collection: str,
+    admin_route_prefix: str = "/admin",
 ) -> str:
     html_text = """<!doctype html>
 <html lang="zh-CN">
@@ -2140,7 +2157,7 @@ def dashboard_page_html(
 </body>
 </html>
 """
-    return (
+    rendered = (
         html_text.replace("__MIN_EMBEDDING_CHARS__", escape(str(min_embedding_chars)))
         .replace("__SIMILARITY_THRESHOLD__", escape(_format_float(similarity_threshold)))
         .replace("__NOT_CONFIGURED_ANSWER__", escape(not_configured_answer))
@@ -2148,3 +2165,4 @@ def dashboard_page_html(
         .replace("__PENDING_COLLECTION__", escape(pending_collection))
         .replace("__DOCS_COLLECTION__", escape(docs_collection))
     )
+    return _apply_admin_prefix(rendered, admin_route_prefix)

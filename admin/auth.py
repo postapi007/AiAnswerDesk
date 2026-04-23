@@ -67,10 +67,9 @@ def set_auth_cookie(response: Response, token: str, ttl: int) -> None:
         httponly=True,
         samesite="lax",
         secure=False,
-        path="/admin",
+        path=SETTINGS.admin_route_prefix,
     )
 
 
 def clear_auth_cookie(response: Response) -> None:
-    response.delete_cookie(key=COOKIE_NAME, path="/admin")
-
+    response.delete_cookie(key=COOKIE_NAME, path=SETTINGS.admin_route_prefix)

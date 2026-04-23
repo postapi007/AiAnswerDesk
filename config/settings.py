@@ -40,6 +40,7 @@ class AppSettings:
     auto_retrieve_knowledge: bool
     enable_qa_model: bool
     auto_cache_qa_answer: bool
+    admin_route_prefix: str
     admin_password: str
     admin_session_ttl_seconds: int
 
@@ -136,6 +137,18 @@ def _strip_json_comments(content: str) -> str:
         i += 1
 
     return "".join(chars)
+
+
+def _normalize_route_prefix(value: Any, fallback: str = "/admin") -> str:
+    text = str(value or "").strip()
+    if not text:
+        text = fallback
+    if not text.startswith("/"):
+        text = f"/{text}"
+    normalized = "/" + text.strip("/")
+    if normalized == "/":
+        return fallback
+    return normalized
 
 
 def _read_json_config(path: Path) -> dict[str, Any]:
@@ -332,6 +345,12 @@ def load_settings(config_path: Path = CONFIG_FILE_PATH) -> AppSettings:
     )
 
     admin = data.get("admin", {})
+    admin_route_prefix = _normalize_route_prefix(admin.get("route_prefix", "/admin"), "/admin")
+    admin_route_prefix = _normalize_route_prefix(
+        os.getenv("ADMIN_ROUTE_PREFIX", admin_route_prefix),
+        admin_route_prefix,
+    )
+
     admin_password = str(admin.get("password", "admin123456")).strip() or "admin123456"
     admin_password = os.getenv("ADMIN_PASSWORD", admin_password).strip() or "admin123456"
 
@@ -373,6 +392,7 @@ def load_settings(config_path: Path = CONFIG_FILE_PATH) -> AppSettings:
         auto_retrieve_knowledge=auto_retrieve_knowledge,
         enable_qa_model=enable_qa_model,
         auto_cache_qa_answer=auto_cache_qa_answer,
+        admin_route_prefix=admin_route_prefix,
         admin_password=admin_password,
         admin_session_ttl_seconds=admin_session_ttl_seconds,
     )

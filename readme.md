@@ -70,6 +70,8 @@ curl "http://127.0.0.1:8000/api/?content=怎么退款"
 ## 后台管理（`/admin`）
 * 入口：`GET /admin`
 * 登录方式：固定密码登录（配置项：`config/app.json -> admin.password`）
+* 路由前缀：`config/app.json -> admin.route_prefix`（默认 `/admin`，修改后后台与 `/admin/api/*` 会自动跟随）
+* 一键随机后台地址：`python main.py AdminRevise`（会生成随机 10 位前缀，字符集为大小写字母+数字，执行后需重启服务）
 * 后台代码目录：`admin/`（登录、页面、知识库管理接口都在此目录）
 * 布局：左侧菜单栏（控制台、知识库列表、知识库分片、知识库待审核、应答界面、LLM模版、系统设置）+ 右侧内容区
 

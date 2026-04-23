@@ -45,7 +45,7 @@ from .service import (
 )
 
 
-router = APIRouter()
+router = APIRouter(prefix=SETTINGS.admin_route_prefix)
 
 
 class AdminLoginRequest(BaseModel):
@@ -136,10 +136,10 @@ class AdminWebChatSettingsRequest(BaseModel):
     quick_phrases: List[str] = Field(default_factory=list)
 
 
-@router.get("/admin", response_class=HTMLResponse)
+@router.get("", response_class=HTMLResponse)
 def admin_home(request: Request):
+    runtime = load_settings()
     if is_authenticated(request):
-        runtime = load_settings()
         return HTMLResponse(
             dashboard_page_html(
                 min_embedding_chars=runtime.min_embedding_chars,
@@ -148,12 +148,13 @@ def admin_home(request: Request):
                 faq_collection=runtime.qdrant_collection,
                 pending_collection=runtime.qdrant_pending_collection,
                 docs_collection=runtime.qdrant_docs_collection,
+                admin_route_prefix=SETTINGS.admin_route_prefix,
             )
         )
-    return HTMLResponse(login_page_html())
+    return HTMLResponse(login_page_html(admin_route_prefix=SETTINGS.admin_route_prefix))
 
 
-@router.post("/admin/login")
+@router.post("/login")
 def admin_login(payload: AdminLoginRequest):
     if payload.password.strip() != SETTINGS.admin_password:
         return JSONResponse(status_code=401, content={"detail": "密码错误"})
@@ -164,7 +165,7 @@ def admin_login(payload: AdminLoginRequest):
     return response
 
 
-@router.post("/admin/logout")
+@router.post("/logout")
 def admin_logout(request: Request):
     token = request.cookies.get(COOKIE_NAME, "").strip()
     if token:
@@ -174,7 +175,7 @@ def admin_logout(request: Request):
     return response
 
 
-@router.get("/admin/api/knowledge")
+@router.get("/api/knowledge")
 def admin_list_knowledge(
     request: Request,
     limit: int = Query(10, ge=1, le=10, description="每页条数"),
@@ -194,13 +195,13 @@ def admin_list_knowledge(
     )
 
 
-@router.post("/admin/api/knowledge")
+@router.post("/api/knowledge")
 def admin_create_knowledge(request: Request, payload: AdminCreateKnowledgeRequest):
     require_admin(request)
     return create_knowledge_point(payload.question, payload.answer)
 
 
-@router.delete("/admin/api/knowledge/{point_id}")
+@router.delete("/api/knowledge/{point_id}")
 def admin_delete_knowledge(
     request: Request,
     point_id: str,
@@ -213,13 +214,13 @@ def admin_delete_knowledge(
     return delete_knowledge_point(point_id, collection_name=collection)
 
 
-@router.post("/admin/api/knowledge/batch")
+@router.post("/api/knowledge/batch")
 def admin_batch_import(request: Request, payload: AdminBatchImportRequest):
     require_admin(request)
     return batch_create_knowledge(payload.content, collection_name=FAQ_COLLECTION)
 
 
-@router.post("/admin/api/knowledge/batch/preview")
+@router.post("/api/knowledge/batch/preview")
 def admin_batch_preview(request: Request, payload: AdminBatchPreviewRequest):
     require_admin(request)
     return preview_batch_knowledge(
@@ -230,7 +231,7 @@ def admin_batch_preview(request: Request, payload: AdminBatchPreviewRequest):
     )
 
 
-@router.post("/admin/api/knowledge/batch/import")
+@router.post("/api/knowledge/batch/import")
 def admin_batch_import_confirm(request: Request, payload: AdminBatchImportConfirmRequest):
     require_admin(request)
     return import_batch_knowledge(
@@ -240,7 +241,7 @@ def admin_batch_import_confirm(request: Request, payload: AdminBatchImportConfir
     )
 
 
-@router.post("/admin/api/docs-chunk/preview")
+@router.post("/api/docs-chunk/preview")
 def admin_docs_chunk_preview(request: Request, payload: AdminDocsChunkPreviewRequest):
     require_admin(request)
     return preview_docs_chunk_import(
@@ -256,7 +257,7 @@ def admin_docs_chunk_preview(request: Request, payload: AdminDocsChunkPreviewReq
     )
 
 
-@router.post("/admin/api/docs-chunk/import")
+@router.post("/api/docs-chunk/import")
 def admin_docs_chunk_import(request: Request, payload: AdminDocsChunkImportRequest):
     require_admin(request)
     return import_docs_chunk_entries(
@@ -272,7 +273,7 @@ def admin_docs_chunk_import(request: Request, payload: AdminDocsChunkImportReque
     )
 
 
-@router.post("/admin/api/docs-chunk/upload-image")
+@router.post("/api/docs-chunk/upload-image")
 def admin_docs_chunk_upload_image(request: Request, payload: AdminUploadImageRequest):
     require_admin(request)
     return save_uploaded_image_to_picture(
@@ -281,7 +282,7 @@ def admin_docs_chunk_upload_image(request: Request, payload: AdminUploadImageReq
     )
 
 
-@router.get("/admin/api/docs-chunk/similarity")
+@router.get("/api/docs-chunk/similarity")
 def admin_docs_chunk_similarity(
     request: Request,
     content: str = Query(..., description="测试内容"),
@@ -290,7 +291,7 @@ def admin_docs_chunk_similarity(
     return test_docs_chunk_similarity(content=content)
 
 
-@router.post("/admin/api/knowledge/batch-delete")
+@router.post("/api/knowledge/batch-delete")
 def admin_batch_delete(
     request: Request,
     payload: AdminBatchDeleteRequest,
@@ -303,19 +304,19 @@ def admin_batch_delete(
     return batch_delete_knowledge_points(payload.ids, collection_name=collection)
 
 
-@router.post("/admin/api/pending/{point_id}/approve")
+@router.post("/api/pending/{point_id}/approve")
 def admin_approve_pending(request: Request, point_id: str):
     require_admin(request)
     return approve_pending_knowledge_point(point_id)
 
 
-@router.get("/admin/api/settings/app")
+@router.get("/api/settings/app")
 def admin_get_app_settings(request: Request):
     require_admin(request)
     return get_app_api_settings()
 
 
-@router.post("/admin/api/settings/app")
+@router.post("/api/settings/app")
 def admin_update_app_settings(request: Request, payload: AdminApiSettingsRequest):
     require_admin(request)
     return update_app_api_settings(
@@ -328,13 +329,13 @@ def admin_update_app_settings(request: Request, payload: AdminApiSettingsRequest
     )
 
 
-@router.get("/admin/api/settings/fragment-read")
+@router.get("/api/settings/fragment-read")
 def admin_get_fragment_read_settings(request: Request):
     require_admin(request)
     return get_fragment_read_settings()
 
 
-@router.post("/admin/api/settings/fragment-read")
+@router.post("/api/settings/fragment-read")
 def admin_update_fragment_read_settings(
     request: Request,
     payload: AdminFragmentReadSettingsRequest,
@@ -346,25 +347,25 @@ def admin_update_fragment_read_settings(
     )
 
 
-@router.get("/admin/api/settings/qa-template")
+@router.get("/api/settings/qa-template")
 def admin_get_qa_template(request: Request):
     require_admin(request)
     return get_qa_prompt_template()
 
 
-@router.post("/admin/api/settings/qa-template")
+@router.post("/api/settings/qa-template")
 def admin_update_qa_template(request: Request, payload: AdminQaTemplateRequest):
     require_admin(request)
     return update_qa_prompt_template(payload.qa_prompt_template)
 
 
-@router.get("/admin/api/settings/web-chat")
+@router.get("/api/settings/web-chat")
 def admin_get_web_chat_settings(request: Request):
     require_admin(request)
     return get_web_chat_settings()
 
 
-@router.post("/admin/api/settings/web-chat")
+@router.post("/api/settings/web-chat")
 def admin_update_web_chat_settings(request: Request, payload: AdminWebChatSettingsRequest):
     require_admin(request)
     return update_web_chat_settings(

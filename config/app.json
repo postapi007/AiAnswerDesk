@@ -39,6 +39,7 @@
   },
   "admin": {
     "password": "admin", // 后台固定登录密码（建议改成你自己的）
+    "route_prefix": "/93zEn69gxJ", // 后台路由前缀（可改成 /aB3xY8kP2q）
     "session_ttl_seconds": 28800 // 后台登录态有效期（秒）
   }
 }
