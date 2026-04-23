@@ -30,6 +30,7 @@ from .service import (
     create_knowledge_point,
     delete_knowledge_point,
     get_app_api_settings,
+    get_fragment_read_settings,
     get_qa_prompt_template,
     import_docs_chunk_entries,
     import_batch_knowledge,
@@ -38,6 +39,7 @@ from .service import (
     preview_batch_knowledge,
     save_uploaded_image_to_picture,
     update_app_api_settings,
+    update_fragment_read_settings,
     update_qa_prompt_template,
 )
 
@@ -115,6 +117,11 @@ class AdminApiSettingsRequest(BaseModel):
 
 class AdminQaTemplateRequest(BaseModel):
     qa_prompt_template: str = Field(..., min_length=1)
+
+
+class AdminFragmentReadSettingsRequest(BaseModel):
+    similarity_threshold: float = Field(..., ge=0, le=1)
+    limit: int = Field(..., ge=1, le=10)
 
 
 class AdminWebChatSettingsRequest(BaseModel):
@@ -300,6 +307,24 @@ def admin_update_app_settings(request: Request, payload: AdminApiSettingsRequest
         auto_retrieve_knowledge=payload.auto_retrieve_knowledge,
         enable_qa_model=payload.enable_qa_model,
         auto_cache_qa_answer=payload.auto_cache_qa_answer,
+    )
+
+
+@router.get("/admin/api/settings/fragment-read")
+def admin_get_fragment_read_settings(request: Request):
+    require_admin(request)
+    return get_fragment_read_settings()
+
+
+@router.post("/admin/api/settings/fragment-read")
+def admin_update_fragment_read_settings(
+    request: Request,
+    payload: AdminFragmentReadSettingsRequest,
+):
+    require_admin(request)
+    return update_fragment_read_settings(
+        similarity_threshold=payload.similarity_threshold,
+        limit=payload.limit,
     )
 
 

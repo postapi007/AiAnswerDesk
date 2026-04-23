@@ -262,6 +262,10 @@ def _replace_qa_keys(raw_text: str, replacements: dict[str, str]) -> str:
     return _replace_keys_in_block(raw_text, "qa", replacements)
 
 
+def _replace_fragment_read_keys(raw_text: str, replacements: dict[str, str]) -> str:
+    return _replace_keys_in_block(raw_text, "fragment_read", replacements)
+
+
 def _replace_api_block_values(
     raw_text: str,
     similarity_threshold: float,
@@ -375,6 +379,82 @@ def update_app_api_settings(
         "saved": True,
         "message": "已更新 config/app.json",
         **get_app_api_settings(),
+    }
+
+
+def get_fragment_read_settings() -> dict[str, Any]:
+    parsed = _read_app_config_dict(CONFIG_FILE_PATH)
+    fragment_read = parsed.get("fragment_read")
+    if not isinstance(fragment_read, dict):
+        raise HTTPException(status_code=500, detail='配置文件缺少 "fragment_read" 节点')
+
+    runtime = load_settings(CONFIG_FILE_PATH)
+    raw_threshold = fragment_read.get(
+        "similarity_threshold",
+        runtime.fragment_read_similarity_threshold,
+    )
+    try:
+        config_threshold = float(raw_threshold)
+    except (TypeError, ValueError):
+        config_threshold = runtime.fragment_read_similarity_threshold
+    if config_threshold < 0:
+        config_threshold = 0.0
+    if config_threshold > 1:
+        config_threshold = 1.0
+
+    raw_limit = fragment_read.get("limit", runtime.fragment_read_limit)
+    try:
+        config_limit = int(raw_limit)
+    except (TypeError, ValueError):
+        config_limit = runtime.fragment_read_limit
+    if config_limit < 1:
+        config_limit = 1
+    if config_limit > 10:
+        config_limit = 10
+
+    return {
+        "config_path": str(CONFIG_FILE_PATH),
+        "fragment_read": {
+            "similarity_threshold": config_threshold,
+            "limit": config_limit,
+        },
+        "effective_fragment_read": {
+            "similarity_threshold": runtime.fragment_read_similarity_threshold,
+            "limit": runtime.fragment_read_limit,
+        },
+        "env_overrides": {
+            "similarity_threshold": bool(os.getenv("FRAGMENT_READ_SIMILARITY_THRESHOLD")),
+            "limit": bool(os.getenv("FRAGMENT_READ_LIMIT")),
+        },
+    }
+
+
+def update_fragment_read_settings(
+    similarity_threshold: float,
+    limit: int,
+) -> dict[str, Any]:
+    if similarity_threshold < 0 or similarity_threshold > 1:
+        raise HTTPException(status_code=422, detail="similarity_threshold 必须在 0~1 之间")
+    if limit < 1 or limit > 10:
+        raise HTTPException(status_code=422, detail="limit 必须在 1~10 之间")
+
+    raw_text = _read_app_config_text(CONFIG_FILE_PATH)
+    updated_text = _replace_fragment_read_keys(
+        raw_text,
+        {
+            "similarity_threshold": _format_float(similarity_threshold),
+            "limit": str(limit),
+        },
+    )
+    try:
+        CONFIG_FILE_PATH.write_text(updated_text, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"写入配置文件失败: {exc}") from exc
+
+    return {
+        "saved": True,
+        "message": "已更新分片读取配置",
+        **get_fragment_read_settings(),
     }
 
 

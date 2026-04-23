@@ -5,16 +5,73 @@ from time import monotonic
 
 from fastapi import HTTPException
 
+from .embedding import build_query_embedding
+from .qdrant import retrieve_from_qdrant
 from config.settings import AppSettings
 
 
-def _render_qa_prompt(template: str, content: str) -> str:
+def _render_qa_prompt(template: str, content: str, fragmented_data: str = "") -> str:
     base_template = (template or "").strip()
     if not base_template:
         base_template = "请基于已知信息回答用户问题：{content}"
     if "{content}" in base_template:
-        return base_template.replace("{content}", content)
-    return f"{base_template}\n\n用户提问：{content}"
+        prompt = base_template.replace("{content}", content)
+    else:
+        prompt = f"{base_template}\n\n用户提问：{content}"
+    if "{fragmenteddata}" in prompt:
+        return prompt.replace("{fragmenteddata}", fragmented_data)
+    return prompt
+
+
+def _format_fragmented_data(hits: list[dict[str, object]]) -> str:
+    lines: list[str] = []
+    for idx, hit in enumerate(hits, start=1):
+        answer_text = str(hit.get("answer", "")).strip()
+        if not answer_text:
+            continue
+        if len(answer_text) > 1200:
+            answer_text = f"{answer_text[:1200]}..."
+        lines.append(f"{idx}. {answer_text}")
+    return "\n".join(lines)
+
+
+def _build_fragmented_data(content: str, runtime: AppSettings) -> str:
+    query = content.strip()
+    if not query:
+        return ""
+
+    try:
+        query_vector = build_query_embedding(query)
+        raw_hits = retrieve_from_qdrant(
+            query_vector=query_vector,
+            limit=runtime.fragment_read_limit,
+            collection_name=runtime.qdrant_docs_collection,
+        )
+    except Exception as exc:
+        print(f"[qa_model] fragmenteddata retrieve failed: {type(exc).__name__}: {exc}", flush=True)
+        return ""
+
+    filtered_hits: list[dict[str, object]] = []
+    for hit in raw_hits:
+        try:
+            score = float(hit.get("score", 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+        if score < runtime.fragment_read_similarity_threshold:
+            continue
+        filtered_hits.append(hit)
+        if len(filtered_hits) >= runtime.fragment_read_limit:
+            break
+
+    fragmented_data = _format_fragmented_data(filtered_hits)
+    print(
+        "[qa_model] fragmenteddata "
+        f"hits={len(filtered_hits)} "
+        f"threshold={runtime.fragment_read_similarity_threshold} "
+        f"limit={runtime.fragment_read_limit}",
+        flush=True,
+    )
+    return fragmented_data
 
 
 def _extract_text_from_response(response: object) -> str:
@@ -63,7 +120,11 @@ def ask_qa_model(content: str, runtime: AppSettings) -> str:
             detail=f"缺少问答模型 API Key，请设置环境变量: {runtime.qa_api_key_env}",
         )
 
-    prompt = _render_qa_prompt(runtime.qa_prompt_template, content)
+    base_template = runtime.qa_prompt_template or ""
+    fragmented_data = ""
+    if "{fragmenteddata}" in base_template:
+        fragmented_data = _build_fragmented_data(content, runtime)
+    prompt = _render_qa_prompt(base_template, content, fragmented_data)
     start_time = monotonic()
 
     try:

@@ -619,6 +619,11 @@ def dashboard_page_html(
           </div>
           <div class="status" id="qaTemplateStatus"></div>
         </section>
+        <section class="card">
+          <h3 style="margin:0 0 10px;font-size:16px;">占位符说明</h3>
+          <p class="muted">用户发送过来的消息=<code>{content}</code>（必填）</p>
+          <p class="muted">知识库分片=<code>{fragmenteddata}</code>（非必填，留空则不匹配分片数据）</p>
+        </section>
       </section>
 
       <section class="view" id="webReplyView">
@@ -685,6 +690,20 @@ def dashboard_page_html(
             <button class="btn" id="saveSettingsBtn" type="button">保存配置</button>
           </div>
           <div class="status" id="settingsStatus"></div>
+        </section>
+        <section class="card">
+          <h3 style="margin:0 0 10px;font-size:16px;">分片读取</h3>
+          <label for="cfgFragmentReadSimilarityThreshold">分片相似度阈值（0~1）</label>
+          <input id="cfgFragmentReadSimilarityThreshold" type="number" min="0" max="1" step="0.01" />
+
+          <label for="cfgFragmentReadLimit" style="margin-top:10px;">分片返回条数（1~10）</label>
+          <input id="cfgFragmentReadLimit" type="number" min="1" max="10" step="1" />
+
+          <div class="btn-row">
+            <button class="btn" id="reloadFragmentReadBtn" type="button">重新读取</button>
+            <button class="btn" id="saveFragmentReadBtn" type="button">保存配置</button>
+          </div>
+          <div class="status" id="fragmentReadSettingsStatus"></div>
         </section>
       </section>
     </main>
@@ -826,6 +845,7 @@ def dashboard_page_html(
       if (safeView === "settings" && !settingsLoaded) {
         settingsLoaded = true;
         loadSystemSettings();
+        loadFragmentReadSettings();
       }
     }
 
@@ -1442,6 +1462,20 @@ def dashboard_page_html(
       }
     }
 
+    async function loadFragmentReadSettings() {
+      setStatus("fragmentReadSettingsStatus", "读取配置中...", true);
+      try {
+        const data = await apiRequest("GET", "/admin/api/settings/fragment-read");
+        if (!data) return;
+        const fragmentRead = data.fragment_read || {};
+        document.getElementById("cfgFragmentReadSimilarityThreshold").value = String(fragmentRead.similarity_threshold ?? "");
+        document.getElementById("cfgFragmentReadLimit").value = String(fragmentRead.limit ?? "");
+        setStatus("fragmentReadSettingsStatus", "配置读取成功", true);
+      } catch (err) {
+        setStatus("fragmentReadSettingsStatus", err.message || "读取配置失败", false);
+      }
+    }
+
     async function loadQaTemplate() {
       setStatus("qaTemplateStatus", "读取模版中...", true);
       try {
@@ -1564,6 +1598,31 @@ def dashboard_page_html(
         await loadSystemSettings();
       } catch (err) {
         setStatus("settingsStatus", err.message || "保存失败", false);
+      }
+    }
+
+    async function saveFragmentReadSettings() {
+      const similarityThreshold = Number(document.getElementById("cfgFragmentReadSimilarityThreshold").value);
+      const limit = Number(document.getElementById("cfgFragmentReadLimit").value);
+      if (Number.isNaN(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
+        setStatus("fragmentReadSettingsStatus", "similarity_threshold 必须在 0~1 之间", false);
+        return;
+      }
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+        setStatus("fragmentReadSettingsStatus", "limit 必须是 1~10 的整数", false);
+        return;
+      }
+
+      setStatus("fragmentReadSettingsStatus", "保存中...", true);
+      try {
+        await apiRequest("POST", "/admin/api/settings/fragment-read", {
+          similarity_threshold: similarityThreshold,
+          limit: limit
+        });
+        setStatus("fragmentReadSettingsStatus", "保存成功", true);
+        await loadFragmentReadSettings();
+      } catch (err) {
+        setStatus("fragmentReadSettingsStatus", err.message || "保存失败", false);
       }
     }
 
@@ -1724,6 +1783,8 @@ def dashboard_page_html(
     document.getElementById("menuSettings").addEventListener("click", () => switchView("settings"));
     document.getElementById("reloadSettingsBtn").addEventListener("click", loadSystemSettings);
     document.getElementById("saveSettingsBtn").addEventListener("click", saveSystemSettings);
+    document.getElementById("reloadFragmentReadBtn").addEventListener("click", loadFragmentReadSettings);
+    document.getElementById("saveFragmentReadBtn").addEventListener("click", saveFragmentReadSettings);
     document.getElementById("reloadQaTemplateBtn").addEventListener("click", loadQaTemplate);
     document.getElementById("saveQaTemplateBtn").addEventListener("click", saveQaTemplate);
     document.getElementById("reloadWebReplyBtn").addEventListener("click", loadWebReplySettings);

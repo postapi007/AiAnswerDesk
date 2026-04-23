@@ -26,6 +26,8 @@ class AppSettings:
     qa_api_key_env: str
     qa_timeout_seconds: int
     qa_prompt_template: str
+    fragment_read_similarity_threshold: float
+    fragment_read_limit: int
     web_enabled: bool
     web_chat_title: str
     web_welcome_template: str
@@ -156,6 +158,7 @@ def load_settings(config_path: Path = CONFIG_FILE_PATH) -> AppSettings:
     embedding = data.get("embedding", {})
     api = data.get("api", {})
     qa = data.get("qa", {})
+    fragment_read = data.get("fragment_read", {})
     web = data.get("web", {})
 
     qdrant_url = str(qdrant.get("url", "http://127.0.0.1:3333")).strip().rstrip("/")
@@ -254,6 +257,32 @@ def load_settings(config_path: Path = CONFIG_FILE_PATH) -> AppSettings:
     qa_prompt_template = str(qa.get("qa_prompt_template", "{content}")).strip() or "{content}"
     qa_prompt_template = os.getenv("QA_PROMPT_TEMPLATE", os.getenv("API_QA_PROMPT_TEMPLATE", qa_prompt_template)).strip() or "{content}"
 
+    fragment_read_similarity_threshold = _to_float(
+        fragment_read.get("similarity_threshold", 0.75),
+        0.75,
+    )
+    fragment_read_similarity_threshold = _to_float(
+        os.getenv(
+            "FRAGMENT_READ_SIMILARITY_THRESHOLD",
+            fragment_read_similarity_threshold,
+        ),
+        fragment_read_similarity_threshold,
+    )
+    if fragment_read_similarity_threshold < 0:
+        fragment_read_similarity_threshold = 0.0
+    if fragment_read_similarity_threshold > 1:
+        fragment_read_similarity_threshold = 1.0
+
+    fragment_read_limit = _to_int(fragment_read.get("limit", 3), 3)
+    fragment_read_limit = _to_int(
+        os.getenv("FRAGMENT_READ_LIMIT", fragment_read_limit),
+        fragment_read_limit,
+    )
+    if fragment_read_limit < 1:
+        fragment_read_limit = 1
+    if fragment_read_limit > 10:
+        fragment_read_limit = 10
+
     web_enabled = _to_bool(web.get("enabled", True), True)
     web_enabled = _to_bool(os.getenv("WEB_ENABLED", web_enabled), web_enabled)
 
@@ -330,6 +359,8 @@ def load_settings(config_path: Path = CONFIG_FILE_PATH) -> AppSettings:
         qa_api_key_env=qa_api_key_env,
         qa_timeout_seconds=qa_timeout_seconds,
         qa_prompt_template=qa_prompt_template,
+        fragment_read_similarity_threshold=fragment_read_similarity_threshold,
+        fragment_read_limit=fragment_read_limit,
         web_enabled=web_enabled,
         web_chat_title=web_chat_title,
         web_welcome_template=web_welcome_template,

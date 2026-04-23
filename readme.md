@@ -2,7 +2,7 @@
 ![web](img/web.png)
 ## 项目说明  AI AnswerDesk（AI 应答台）
 * 这是一个基于 `Python + FastAPI + Qdrant` 的 AI客服系统，检索增强客服（RAG-like）
-* 支持“手动导入知识库或者自主学习 + 检索 + 问答模型兜底”。
+* 支持“手动导入知识库 + 自主学习 + 检索 + 问答模型兜底”。
 * 对外接口：`GET /api/?content=...`，用于客服问答。
 * 前台应答界面：`GET /web?username=...`，用于客服聊天展示（username 可为空）。
 * 后台入口：`GET /admin`，用于知识库和系统配置管理。

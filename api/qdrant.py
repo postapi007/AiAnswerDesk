@@ -287,9 +287,10 @@ def retrieve_by_keyword(
 def retrieve_from_qdrant(
     query_vector: list[float],
     limit: int = SETTINGS.default_limit,
+    collection_name: str = SETTINGS.qdrant_collection,
 ) -> list[dict[str, Any]]:
-    search_url = f"{SETTINGS.qdrant_url}/collections/{SETTINGS.qdrant_collection}/points/search"
-    query_url = f"{SETTINGS.qdrant_url}/collections/{SETTINGS.qdrant_collection}/points/query"
+    search_url = f"{SETTINGS.qdrant_url}/collections/{collection_name}/points/search"
+    query_url = f"{SETTINGS.qdrant_url}/collections/{collection_name}/points/query"
     search_body = {
         "vector": query_vector,
         "limit": limit,
