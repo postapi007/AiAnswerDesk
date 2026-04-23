@@ -273,6 +273,40 @@ def dashboard_page_html(
       width: auto;
       transform: translateY(1px);
     }
+    .doc-mode-group {
+      margin-top: 6px;
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      background: #f1f5f9;
+    }
+    .doc-mode-item {
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+    }
+    .doc-mode-item input {
+      display: none;
+    }
+    .doc-mode-item span {
+      display: inline-block;
+      min-width: 76px;
+      text-align: center;
+      padding: 8px 12px;
+      border-radius: 9px;
+      font-size: 13px;
+      color: #334155;
+      cursor: pointer;
+      transition: all 0.16s ease;
+    }
+    .doc-mode-item input:checked + span {
+      background: linear-gradient(135deg, #0284c7, #0ea5e9);
+      color: #fff;
+      font-weight: 600;
+      box-shadow: 0 6px 14px rgba(2, 132, 199, 0.25);
+    }
     input, textarea, select {
       width: 100%;
       border: 1px solid #cbd5e1;
@@ -531,20 +565,33 @@ def dashboard_page_html(
         </section>
 
         <section class="card">
-          <label for="docChunkFileInput">上传文件（优先使用）</label>
-          <input id="docChunkFileInput" type="file" accept=".txt,.md,.markdown,.csv,.json,.jsonl,.docx,.xlsx,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" />
-          <div class="file-hint">如果上传了文件，优先读取文件；否则读取下方文本内容。</div>
-
-          <label for="docImageUploadInput" style="margin-top:10px;">图片上传（上传到项目 /picture）</label>
-          <input id="docImageUploadInput" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" />
-          <div class="btn-row">
-            <button class="btn" id="uploadDocImageBtn" type="button">上传图片到 /picture</button>
-            <button class="btn" id="clearUploadedDocImageBtn" type="button">清空已上传图片</button>
+          <label>分割类型</label>
+          <div class="doc-mode-group">
+            <label class="doc-mode-item"><input type="radio" name="docChunkSourceMode" value="text" checked /><span>文本</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkSourceMode" value="file" /><span>文件</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkSourceMode" value="image" /><span>图片</span></label>
           </div>
-          <div class="preview-meta" id="docImageUploadResult">未上传图片</div>
 
-          <label for="docChunkContent" style="margin-top:10px;">或粘贴文档内容</label>
-          <textarea id="docChunkContent" placeholder="在这里粘贴需要切片的文档内容"></textarea>
+          <div id="docChunkModeFilePanel" style="margin-top:10px; display:none;">
+            <label for="docChunkFileInput">上传文件</label>
+            <input id="docChunkFileInput" type="file" accept=".txt,.md,.markdown,.csv,.json,.jsonl,.docx,.xlsx" />
+            <div class="file-hint">支持文档文件：txt/md/csv/json/jsonl/docx/xlsx。</div>
+          </div>
+
+          <div id="docChunkModeImagePanel" style="margin-top:10px; display:none;">
+            <label for="docImageUploadInput">图片上传（上传到项目 /picture）</label>
+            <input id="docImageUploadInput" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" />
+            <div class="btn-row">
+              <button class="btn" id="uploadDocImageBtn" type="button">上传图片到 /picture</button>
+              <button class="btn" id="clearUploadedDocImageBtn" type="button">清空已上传图片</button>
+            </div>
+            <div class="preview-meta" id="docImageUploadResult">未上传图片</div>
+          </div>
+
+          <div id="docChunkModeTextPanel" style="margin-top:10px;">
+            <label for="docChunkContent">粘贴文档内容</label>
+            <textarea id="docChunkContent" placeholder="在这里粘贴需要切片的文档内容"></textarea>
+          </div>
 
           <div class="grid-two" style="margin-top:10px;">
             <div>
@@ -956,6 +1003,23 @@ def dashboard_page_html(
       clearDocChunkPreview();
     }
 
+    function getDocChunkSourceMode() {
+      const selected = document.querySelector('input[name="docChunkSourceMode"]:checked');
+      const value = selected ? String(selected.value || "").trim() : "file";
+      return value || "file";
+    }
+
+    function updateDocChunkSourceModeUi() {
+      const mode = getDocChunkSourceMode();
+      const filePanel = document.getElementById("docChunkModeFilePanel");
+      const imagePanel = document.getElementById("docChunkModeImagePanel");
+      const textPanel = document.getElementById("docChunkModeTextPanel");
+      if (filePanel) filePanel.style.display = mode === "file" ? "" : "none";
+      if (imagePanel) imagePanel.style.display = mode === "image" ? "" : "none";
+      if (textPanel) textPanel.style.display = mode === "text" ? "" : "none";
+      clearDocChunkPreview();
+    }
+
     async function uploadDocImageToPicture() {
       const input = document.getElementById("docImageUploadInput");
       const file = input && input.files && input.files.length ? input.files[0] : null;
@@ -998,10 +1062,8 @@ def dashboard_page_html(
       const chunkSize = Number(document.getElementById("docChunkSize").value);
       const chunkOverlap = Number(document.getElementById("docChunkOverlap").value);
       const imagePath = uploadedDocImagePath;
+      const sourceMode = getDocChunkSourceMode();
 
-      if (!file && !content.trim() && !imagePath) {
-        throw new Error("请上传文件、粘贴文档内容或先上传图片");
-      }
       if (!Number.isInteger(chunkSize) || chunkSize < 100 || chunkSize > 1200) {
         throw new Error("切片长度必须是 100~1200 的整数");
       }
@@ -1016,7 +1078,11 @@ def dashboard_page_html(
         chunk_size: chunkSize,
         chunk_overlap: chunkOverlap
       };
-      if (file) {
+
+      if (sourceMode === "file") {
+        if (!file) {
+          throw new Error("请先选择文档文件");
+        }
         const fileName = String(file.name || "").trim();
         const lower = fileName.toLowerCase();
         const supported = [
@@ -1027,38 +1093,29 @@ def dashboard_page_html(
           ".json",
           ".jsonl",
           ".docx",
-          ".xlsx",
-          ".png",
-          ".jpg",
-          ".jpeg",
-          ".webp",
-          ".gif",
-          ".bmp",
-          ".svg"
+          ".xlsx"
         ];
         const isSupported = supported.some((suffix) => lower.endsWith(suffix));
         if (!isSupported) {
-          throw new Error("文件类型不支持");
+          throw new Error("文件模式仅支持 txt/md/csv/json/jsonl/docx/xlsx");
         }
-        const isImage = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"]
-          .some((suffix) => lower.endsWith(suffix));
-        if (isImage) {
-          if (!uploadedDocImagePath) {
-            throw new Error("图片文件请先点击“上传图片到 /picture”");
-          }
-          body.file_name = uploadedDocImageName || fileName;
-        } else {
-          body.file_name = fileName;
-          body.file_content_base64 = await readFileAsBase64(file);
+        body.file_name = fileName;
+        body.file_content_base64 = await readFileAsBase64(file);
+      } else if (sourceMode === "image") {
+        if (!imagePath) {
+          throw new Error("请先上传图片到 /picture");
         }
-      } else {
-        body.content = content;
-      }
-      if (imagePath) {
         body.image_path = imagePath;
-        if (!body.file_name && uploadedDocImageName) {
+        if (uploadedDocImageName) {
           body.file_name = uploadedDocImageName;
         }
+      } else if (sourceMode === "text") {
+        if (!content.trim()) {
+          throw new Error("请先粘贴文档内容");
+        }
+        body.content = content;
+      } else {
+        throw new Error("分割类型无效");
       }
       return body;
     }
@@ -1794,6 +1851,9 @@ def dashboard_page_html(
     document.getElementById("previewDocChunkBtn").addEventListener("click", previewDocChunkImport);
     document.getElementById("importDocChunkBtn").addEventListener("click", importDocChunks);
     document.getElementById("docChunkFileInput").addEventListener("change", clearDocChunkPreview);
+    document.querySelectorAll('input[name="docChunkSourceMode"]').forEach((el) => {
+      el.addEventListener("change", updateDocChunkSourceModeUi);
+    });
     document.getElementById("docImageUploadInput").addEventListener("change", onDocImageUploadInputChange);
     document.getElementById("uploadDocImageBtn").addEventListener("click", uploadDocImageToPicture);
     document.getElementById("clearUploadedDocImageBtn").addEventListener("click", clearUploadedDocImage);
@@ -1871,6 +1931,7 @@ def dashboard_page_html(
     });
 
     updateDocImageUploadResult();
+    updateDocChunkSourceModeUi();
     switchView(getActiveView());
   </script>
 </body>
