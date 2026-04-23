@@ -292,7 +292,7 @@ def dashboard_page_html(
     }
     .doc-mode-item span {
       display: inline-block;
-      min-width: 76px;
+      min-width: 92px;
       text-align: center;
       padding: 8px 12px;
       border-radius: 9px;
@@ -645,6 +645,18 @@ def dashboard_page_html(
               <label for="docChunkOverlap">切片重叠（0~300）</label>
               <input id="docChunkOverlap" type="number" min="0" max="300" step="1" value="60" />
             </div>
+          </div>
+
+          <label style="margin-top:10px;">分段分隔符</label>
+          <div class="doc-mode-group">
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="newline" checked /><span>换行符</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="double_newline" /><span>两个换行符</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="page_break" /><span>分页符</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="custom" /><span>自定义分隔符</span></label>
+          </div>
+          <div id="docChunkCustomDelimiterPanel" style="margin-top:10px; display:none;">
+            <label for="docChunkCustomDelimiter">自定义分隔符（最多20字符）</label>
+            <input id="docChunkCustomDelimiter" type="text" maxlength="20" placeholder="请输入分隔符，例如 ###" />
           </div>
 
           <div class="switch-row">
@@ -1110,6 +1122,12 @@ def dashboard_page_html(
       return value || "file";
     }
 
+    function getDocChunkDelimiterMode() {
+      const selected = document.querySelector('input[name="docChunkDelimiterMode"]:checked');
+      const value = selected ? String(selected.value || "").trim() : "newline";
+      return value || "newline";
+    }
+
     function updateDocChunkSourceModeUi() {
       const mode = getDocChunkSourceMode();
       const filePanel = document.getElementById("docChunkModeFilePanel");
@@ -1118,6 +1136,13 @@ def dashboard_page_html(
       if (filePanel) filePanel.style.display = mode === "file" ? "" : "none";
       if (imagePanel) imagePanel.style.display = mode === "image" ? "" : "none";
       if (textPanel) textPanel.style.display = mode === "text" ? "" : "none";
+      clearDocChunkPreview();
+    }
+
+    function updateDocChunkDelimiterModeUi() {
+      const mode = getDocChunkDelimiterMode();
+      const panel = document.getElementById("docChunkCustomDelimiterPanel");
+      if (panel) panel.style.display = mode === "custom" ? "" : "none";
       clearDocChunkPreview();
     }
 
@@ -1164,6 +1189,9 @@ def dashboard_page_html(
       const chunkOverlap = Number(document.getElementById("docChunkOverlap").value);
       const imagePath = uploadedDocImagePath;
       const sourceMode = getDocChunkSourceMode();
+      const delimiterMode = getDocChunkDelimiterMode();
+      const customDelimiterInput = document.getElementById("docChunkCustomDelimiter");
+      const customDelimiter = customDelimiterInput ? String(customDelimiterInput.value || "") : "";
 
       if (!Number.isInteger(chunkSize) || chunkSize < 100 || chunkSize > 1200) {
         throw new Error("切片长度必须是 100~1200 的整数");
@@ -1175,9 +1203,20 @@ def dashboard_page_html(
         throw new Error("切片重叠必须小于切片长度");
       }
 
+      if (sourceMode !== "image" && delimiterMode === "custom") {
+        if (!customDelimiter) {
+          throw new Error("请选择自定义分隔符后请填写输入内容");
+        }
+        if (customDelimiter.length > 20) {
+          throw new Error("自定义分隔符长度不能超过20");
+        }
+      }
+
       const body = {
         chunk_size: chunkSize,
-        chunk_overlap: chunkOverlap
+        chunk_overlap: chunkOverlap,
+        segment_delimiter_mode: delimiterMode,
+        custom_delimiter: delimiterMode === "custom" ? customDelimiter : ""
       };
 
       if (sourceMode === "file") {
@@ -1234,7 +1273,12 @@ def dashboard_page_html(
       if (data.is_image) {
         summary.textContent = `预览完成：图片模式，记录 ${totalChunks} 条（文件名/路径入库）`;
       } else {
-        summary.textContent = `预览完成：文本 ${sourceChars} 字，切片 ${totalChunks} 条，chunk_size=${chunkSize}，chunk_overlap=${chunkOverlap}`;
+        const delimiterLabel = String(data.segment_delimiter_label || "");
+        const customDelimiter = String(data.custom_delimiter || "");
+        const delimiterExtra = delimiterLabel
+          ? `，分段分隔符=${delimiterLabel}${customDelimiter ? `（${customDelimiter}）` : ""}`
+          : "";
+        summary.textContent = `预览完成：文本 ${sourceChars} 字，切片 ${totalChunks} 条，chunk_size=${chunkSize}，chunk_overlap=${chunkOverlap}${delimiterExtra}`;
       }
 
       const previewChunks = Array.isArray(data.preview_chunks) ? data.preview_chunks : [];
@@ -2003,12 +2047,16 @@ def dashboard_page_html(
     document.querySelectorAll('input[name="docChunkSourceMode"]').forEach((el) => {
       el.addEventListener("change", updateDocChunkSourceModeUi);
     });
+    document.querySelectorAll('input[name="docChunkDelimiterMode"]').forEach((el) => {
+      el.addEventListener("change", updateDocChunkDelimiterModeUi);
+    });
     document.getElementById("docImageUploadInput").addEventListener("change", onDocImageUploadInputChange);
     document.getElementById("uploadDocImageBtn").addEventListener("click", uploadDocImageToPicture);
     document.getElementById("clearUploadedDocImageBtn").addEventListener("click", clearUploadedDocImage);
     document.getElementById("docChunkContent").addEventListener("input", clearDocChunkPreview);
     document.getElementById("docChunkSize").addEventListener("input", clearDocChunkPreview);
     document.getElementById("docChunkOverlap").addEventListener("input", clearDocChunkPreview);
+    document.getElementById("docChunkCustomDelimiter").addEventListener("input", clearDocChunkPreview);
     document.getElementById("docListRefreshBtn").addEventListener("click", () => loadDocChunkList(docCurrentPage));
     document.getElementById("docSearchBtn").addEventListener("click", () => loadDocChunkList(1));
     document.getElementById("docSimilarityTestBtn").addEventListener("click", testDocChunkSimilarity);
@@ -2086,6 +2134,7 @@ def dashboard_page_html(
     updateDocImageSelectedName();
     updateDocImageUploadResult();
     updateDocChunkSourceModeUi();
+    updateDocChunkDelimiterModeUi();
     switchView(getActiveView());
   </script>
 </body>

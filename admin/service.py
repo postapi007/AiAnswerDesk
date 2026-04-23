@@ -40,6 +40,16 @@ IMAGE_EXTENSIONS = {
     ".bmp",
     ".svg",
 }
+DOC_SEGMENT_MODE_NEWLINE = "newline"
+DOC_SEGMENT_MODE_DOUBLE_NEWLINE = "double_newline"
+DOC_SEGMENT_MODE_PAGE_BREAK = "page_break"
+DOC_SEGMENT_MODE_CUSTOM = "custom"
+DOC_SEGMENT_MODES = {
+    DOC_SEGMENT_MODE_NEWLINE,
+    DOC_SEGMENT_MODE_DOUBLE_NEWLINE,
+    DOC_SEGMENT_MODE_PAGE_BREAK,
+    DOC_SEGMENT_MODE_CUSTOM,
+}
 
 
 def _normalize_admin_collection_name(
@@ -1251,6 +1261,26 @@ def _coerce_chunk_params(chunk_size: int, chunk_overlap: int) -> tuple[int, int]
     return safe_chunk_size, safe_chunk_overlap
 
 
+def _resolve_segment_delimiter(
+    segment_delimiter_mode: str,
+    custom_delimiter: str,
+) -> tuple[str, str]:
+    mode = str(segment_delimiter_mode or DOC_SEGMENT_MODE_NEWLINE).strip().lower()
+    if mode not in DOC_SEGMENT_MODES:
+        allowed = ",".join(sorted(DOC_SEGMENT_MODES))
+        raise HTTPException(status_code=422, detail=f"分段分隔符模式不支持: {mode}，仅允许: {allowed}")
+
+    clean_custom = str(custom_delimiter or "")
+    if mode != DOC_SEGMENT_MODE_CUSTOM:
+        return mode, ""
+
+    if not clean_custom:
+        raise HTTPException(status_code=422, detail="自定义分隔符不能为空")
+    if len(clean_custom) > 20:
+        raise HTTPException(status_code=422, detail="自定义分隔符长度不能超过20")
+    return mode, clean_custom
+
+
 def _smart_split_end(text: str, start: int, hard_end: int) -> int:
     if hard_end >= len(text):
         return len(text)
@@ -1265,29 +1295,83 @@ def _smart_split_end(text: str, start: int, hard_end: int) -> int:
     return hard_end
 
 
-def split_document_chunks(raw_text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
-    text = _normalize_document_text(raw_text)
-    if not text:
+def _split_document_chunks_by_size(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    clean_text = _normalize_document_text(text)
+    if not clean_text:
         return []
 
     safe_chunk_size, safe_chunk_overlap = _coerce_chunk_params(chunk_size, chunk_overlap)
-    if len(text) <= safe_chunk_size:
-        return [text]
+    if len(clean_text) <= safe_chunk_size:
+        return [clean_text]
 
     chunks: list[str] = []
     start = 0
-    while start < len(text):
-        hard_end = min(start + safe_chunk_size, len(text))
-        end = _smart_split_end(text, start, hard_end)
+    while start < len(clean_text):
+        hard_end = min(start + safe_chunk_size, len(clean_text))
+        end = _smart_split_end(clean_text, start, hard_end)
         if end <= start:
             end = hard_end
-        chunk = text[start:end].strip()
+        chunk = clean_text[start:end].strip()
         if chunk:
             chunks.append(chunk)
-        if end >= len(text):
+        if end >= len(clean_text):
             break
         start = max(end - safe_chunk_overlap, start + 1)
     return chunks
+
+
+def _split_by_delimiter(raw_text: str, mode: str, custom_delimiter: str) -> list[str]:
+    source = str(raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if mode == DOC_SEGMENT_MODE_NEWLINE:
+        return source.split("\n")
+    if mode == DOC_SEGMENT_MODE_DOUBLE_NEWLINE:
+        return re.split(r"\n{2,}", source)
+    if mode == DOC_SEGMENT_MODE_PAGE_BREAK:
+        return re.split(r"\f+", source)
+    if mode == DOC_SEGMENT_MODE_CUSTOM:
+        return source.split(custom_delimiter)
+    return [source]
+
+
+def split_document_chunks(
+    raw_text: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    *,
+    segment_delimiter_mode: str = DOC_SEGMENT_MODE_NEWLINE,
+    custom_delimiter: str = "",
+) -> list[str]:
+    mode, clean_custom = _resolve_segment_delimiter(
+        segment_delimiter_mode=segment_delimiter_mode,
+        custom_delimiter=custom_delimiter,
+    )
+    raw_parts = _split_by_delimiter(raw_text, mode, clean_custom)
+    if not raw_parts:
+        return []
+
+    chunks: list[str] = []
+    for part in raw_parts:
+        part_chunks = _split_document_chunks_by_size(part, chunk_size, chunk_overlap)
+        if part_chunks:
+            chunks.extend(part_chunks)
+
+    if chunks:
+        return chunks
+
+    # 当分隔后全部为空时，回退到整段处理，避免误分隔导致结果为空。
+    return _split_document_chunks_by_size(raw_text, chunk_size, chunk_overlap)
+
+
+def _segment_mode_label(mode: str) -> str:
+    if mode == DOC_SEGMENT_MODE_NEWLINE:
+        return "换行符"
+    if mode == DOC_SEGMENT_MODE_DOUBLE_NEWLINE:
+        return "两个换行符"
+    if mode == DOC_SEGMENT_MODE_PAGE_BREAK:
+        return "分页符"
+    if mode == DOC_SEGMENT_MODE_CUSTOM:
+        return "自定义分隔符"
+    return mode
 
 
 def _build_doc_chunk_entries(
@@ -1297,6 +1381,8 @@ def _build_doc_chunk_entries(
     chunks: list[str],
     chunk_size: int,
     chunk_overlap: int,
+    segment_delimiter_mode: str,
+    custom_delimiter: str,
 ) -> list[dict[str, Any]]:
     total = len(chunks)
     file_name = _basename_from_path(source_name)
@@ -1320,6 +1406,9 @@ def _build_doc_chunk_entries(
                     "chunk_chars": len(chunk_text),
                     "chunk_size": chunk_size,
                     "chunk_overlap": chunk_overlap,
+                    "segment_delimiter_mode": segment_delimiter_mode,
+                    "segment_delimiter_label": _segment_mode_label(segment_delimiter_mode),
+                    "custom_delimiter": custom_delimiter,
                 },
             }
         )
@@ -1363,6 +1452,8 @@ def _prepare_docs_chunk_entries(
     image_path: str,
     chunk_size: int,
     chunk_overlap: int,
+    segment_delimiter_mode: str,
+    custom_delimiter: str,
 ) -> dict[str, Any]:
     has_file = bool((file_content_base64 or "").strip())
     clean_content = str(content or "").strip()
@@ -1406,8 +1497,18 @@ def _prepare_docs_chunk_entries(
         file_name=file_name,
         file_content_base64=file_content_base64,
     )
+    resolved_mode, resolved_custom_delimiter = _resolve_segment_delimiter(
+        segment_delimiter_mode=segment_delimiter_mode,
+        custom_delimiter=custom_delimiter,
+    )
     safe_chunk_size, safe_chunk_overlap = _coerce_chunk_params(chunk_size, chunk_overlap)
-    chunks = split_document_chunks(text, safe_chunk_size, safe_chunk_overlap)
+    chunks = split_document_chunks(
+        text,
+        safe_chunk_size,
+        safe_chunk_overlap,
+        segment_delimiter_mode=resolved_mode,
+        custom_delimiter=resolved_custom_delimiter,
+    )
     if not chunks:
         raise HTTPException(status_code=422, detail="文本切片结果为空，请检查文件内容")
 
@@ -1417,6 +1518,8 @@ def _prepare_docs_chunk_entries(
         chunks=chunks,
         chunk_size=safe_chunk_size,
         chunk_overlap=safe_chunk_overlap,
+        segment_delimiter_mode=resolved_mode,
+        custom_delimiter=resolved_custom_delimiter,
     )
     return {
         "source_type": source_type,
@@ -1424,6 +1527,9 @@ def _prepare_docs_chunk_entries(
         "source_chars": len(text),
         "chunk_size": safe_chunk_size,
         "chunk_overlap": safe_chunk_overlap,
+        "segment_delimiter_mode": resolved_mode,
+        "segment_delimiter_label": _segment_mode_label(resolved_mode),
+        "custom_delimiter": resolved_custom_delimiter,
         "chunks": chunks,
         "entries": entries,
         "is_image": False,
@@ -1438,6 +1544,8 @@ def preview_docs_chunk_import(
     image_path: str = "",
     chunk_size: int = 300,
     chunk_overlap: int = 60,
+    segment_delimiter_mode: str = DOC_SEGMENT_MODE_NEWLINE,
+    custom_delimiter: str = "",
     max_preview: int = 20,
 ) -> dict[str, Any]:
     prepared = _prepare_docs_chunk_entries(
@@ -1447,6 +1555,8 @@ def preview_docs_chunk_import(
         image_path=image_path,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        segment_delimiter_mode=segment_delimiter_mode,
+        custom_delimiter=custom_delimiter,
     )
     chunks = prepared["chunks"]
 
@@ -1466,6 +1576,9 @@ def preview_docs_chunk_import(
         "source_chars": prepared["source_chars"],
         "chunk_size": prepared["chunk_size"],
         "chunk_overlap": prepared["chunk_overlap"],
+        "segment_delimiter_mode": prepared.get("segment_delimiter_mode", DOC_SEGMENT_MODE_NEWLINE),
+        "segment_delimiter_label": prepared.get("segment_delimiter_label", _segment_mode_label(DOC_SEGMENT_MODE_NEWLINE)),
+        "custom_delimiter": prepared.get("custom_delimiter", ""),
         "total_chunks": len(chunks),
         "preview_chunks": preview_chunks,
         "preview_limit": preview_limit,
@@ -1482,6 +1595,8 @@ def import_docs_chunk_entries(
     image_path: str = "",
     chunk_size: int = 300,
     chunk_overlap: int = 60,
+    segment_delimiter_mode: str = DOC_SEGMENT_MODE_NEWLINE,
+    custom_delimiter: str = "",
     rollback_on_error: bool = True,
 ) -> dict[str, Any]:
     prepared = _prepare_docs_chunk_entries(
@@ -1491,6 +1606,8 @@ def import_docs_chunk_entries(
         image_path=image_path,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        segment_delimiter_mode=segment_delimiter_mode,
+        custom_delimiter=custom_delimiter,
     )
     entries = prepared["entries"]
 
@@ -1569,6 +1686,9 @@ def import_docs_chunk_entries(
         "source_chars": prepared["source_chars"],
         "chunk_size": prepared["chunk_size"],
         "chunk_overlap": prepared["chunk_overlap"],
+        "segment_delimiter_mode": prepared.get("segment_delimiter_mode", DOC_SEGMENT_MODE_NEWLINE),
+        "segment_delimiter_label": prepared.get("segment_delimiter_label", _segment_mode_label(DOC_SEGMENT_MODE_NEWLINE)),
+        "custom_delimiter": prepared.get("custom_delimiter", ""),
         "total_chunks": total,
         "attempted": attempted,
         "skipped": skipped,

@@ -89,6 +89,8 @@ class AdminDocsChunkPreviewRequest(BaseModel):
     image_path: str = Field(default="")
     chunk_size: int = Field(default=300, ge=100, le=1200)
     chunk_overlap: int = Field(default=60, ge=0, le=300)
+    segment_delimiter_mode: str = Field(default="newline")
+    custom_delimiter: str = Field(default="", max_length=20)
     max_preview: int = Field(default=20, ge=1, le=50)
 
 
@@ -99,6 +101,8 @@ class AdminDocsChunkImportRequest(BaseModel):
     image_path: str = Field(default="")
     chunk_size: int = Field(default=300, ge=100, le=1200)
     chunk_overlap: int = Field(default=60, ge=0, le=300)
+    segment_delimiter_mode: str = Field(default="newline")
+    custom_delimiter: str = Field(default="", max_length=20)
     rollback_on_error: bool = Field(default=True)
 
 
@@ -246,6 +250,8 @@ def admin_docs_chunk_preview(request: Request, payload: AdminDocsChunkPreviewReq
         image_path=payload.image_path,
         chunk_size=payload.chunk_size,
         chunk_overlap=payload.chunk_overlap,
+        segment_delimiter_mode=payload.segment_delimiter_mode,
+        custom_delimiter=payload.custom_delimiter,
         max_preview=payload.max_preview,
     )
 
@@ -260,6 +266,8 @@ def admin_docs_chunk_import(request: Request, payload: AdminDocsChunkImportReque
         image_path=payload.image_path,
         chunk_size=payload.chunk_size,
         chunk_overlap=payload.chunk_overlap,
+        segment_delimiter_mode=payload.segment_delimiter_mode,
+        custom_delimiter=payload.custom_delimiter,
         rollback_on_error=payload.rollback_on_error,
     )
 
