@@ -19,7 +19,7 @@ from fastapi import HTTPException
 
 from api.embedding import build_query_embedding
 from api.http import http_error_detail, request_json
-from api.qdrant import PENDING_COLLECTION, ensure_collection_ready
+from api.qdrant import PENDING_COLLECTION, ensure_collection_ready, retrieve_from_qdrant
 from api.text_normalize import normalize_for_keyword
 from config import SETTINGS
 from config.settings import CONFIG_FILE_PATH, _strip_json_comments, load_settings
@@ -578,6 +578,63 @@ def list_knowledge_points(
         "total_pages": total_pages,
         "has_prev": page > 1 and total_pages > 0,
         "has_next": page < total_pages,
+    }
+
+
+def test_docs_chunk_similarity(content: str, limit: int = 50) -> dict[str, Any]:
+    clean_content = content.strip()
+    if not clean_content:
+        raise HTTPException(status_code=422, detail="content 不能为空")
+
+    safe_limit = max(1, min(int(limit), 50))
+    query_vector = build_query_embedding(clean_content)
+    raw_hits = retrieve_from_qdrant(
+        query_vector=query_vector,
+        limit=safe_limit,
+        collection_name=DOCS_COLLECTION_NAME,
+    )
+
+    items: list[dict[str, Any]] = []
+    for hit in raw_hits:
+        try:
+            score = float(hit.get("score", 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+
+        file_name = str(hit.get("file_name", "")).strip()
+        doc_name = str(hit.get("doc_name", "")).strip()
+        file_path = str(hit.get("file_path", "")).strip()
+        if not file_name and file_path:
+            file_name = file_path.replace("\\", "/").split("/")[-1]
+        if not file_name:
+            file_name = doc_name or str(hit.get("question", "")).strip()
+
+        items.append(
+            {
+                "id": hit.get("id"),
+                "question": str(hit.get("question", "")).strip(),
+                "answer": str(hit.get("answer", "")).strip(),
+                "file_name": file_name,
+                "doc_name": doc_name,
+                "file_path": file_path,
+                "doc_type": str(hit.get("doc_type", "")).strip(),
+                "is_image": bool(hit.get("is_image", False)),
+                "score": score,
+            }
+        )
+
+    total = len(items)
+    return {
+        "collection": DOCS_COLLECTION_NAME,
+        "content": clean_content,
+        "limit": safe_limit,
+        "page": 1,
+        "total_pages": 1,
+        "has_prev": False,
+        "has_next": False,
+        "total": total,
+        "count": total,
+        "items": items,
     }
 
 

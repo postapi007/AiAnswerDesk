@@ -340,6 +340,11 @@ def retrieve_from_qdrant(
         payload = point.get("payload") or {}
         question = str(payload.get("question", "")).strip()
         answer = str(payload.get("answer", "")).strip()
+        file_name = str(payload.get("file_name", "")).strip()
+        doc_name = str(payload.get("doc_name", "")).strip()
+        file_path = str(payload.get("file_path", "")).strip()
+        doc_type = str(payload.get("doc_type", "")).strip()
+        is_image = bool(payload.get("is_image", False))
 
         raw_score = point.get("score", point.get("distance", 0.0))
         try:
@@ -352,6 +357,11 @@ def retrieve_from_qdrant(
                 "id": point.get("id"),
                 "question": question,
                 "answer": answer,
+                "file_name": file_name,
+                "doc_name": doc_name,
+                "file_path": file_path,
+                "doc_type": doc_type,
+                "is_image": is_image,
                 "score": score,
             }
         )

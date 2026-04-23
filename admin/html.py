@@ -609,13 +609,21 @@ def dashboard_page_html(
 
           <div id="docChunkModeFilePanel" style="margin-top:10px; display:none;">
             <label for="docChunkFileInput">上传文件</label>
-            <input id="docChunkFileInput" type="file" accept=".txt,.md,.markdown,.csv,.json,.jsonl,.docx,.xlsx" />
+            <div class="file-upload-row">
+              <button class="btn" id="docChunkPickFileBtn" type="button">选择文件</button>
+              <span class="file-upload-name" id="docChunkFileName">未选择文件</span>
+            </div>
+            <input id="docChunkFileInput" type="file" accept=".txt,.md,.markdown,.csv,.json,.jsonl,.docx,.xlsx" style="display:none;" />
             <div class="file-hint">支持文档文件：txt/md/csv/json/jsonl/docx/xlsx。</div>
           </div>
 
           <div id="docChunkModeImagePanel" style="margin-top:10px; display:none;">
             <label for="docImageUploadInput">图片上传（上传到项目 /picture）</label>
-            <input id="docImageUploadInput" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" />
+            <div class="file-upload-row">
+              <button class="btn" id="docChunkPickImageBtn" type="button">选择图片</button>
+              <span class="file-upload-name" id="docImageSelectedName">未选择图片</span>
+            </div>
+            <input id="docImageUploadInput" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" style="display:none;" />
             <div class="btn-row">
               <button class="btn" id="uploadDocImageBtn" type="button">上传图片到 /picture</button>
               <button class="btn" id="clearUploadedDocImageBtn" type="button">清空已上传图片</button>
@@ -662,6 +670,7 @@ def dashboard_page_html(
             <div class="search-box">
               <input id="docSearchKeyword" placeholder="输入关键字搜索（文件名/路径/内容/id）" />
               <button class="btn" id="docSearchBtn" type="button">搜索</button>
+              <button class="btn" id="docSimilarityTestBtn" type="button">测试向量相似度(消耗Token)</button>
               <button class="btn" id="docResetSearchBtn" type="button">重置</button>
             </div>
             <div class="btn-row" style="margin-top:0;">
@@ -677,6 +686,7 @@ def dashboard_page_html(
                 <th class="col-q">文件名</th>
                 <th class="col-a">路径/内容</th>
                 <th class="col-score">类型</th>
+                <th class="col-score">相似度</th>
                 <th class="col-op">操作</th>
               </tr>
             </thead>
@@ -1050,11 +1060,38 @@ def dashboard_page_html(
       el.textContent = `已上传：${uploadedDocImageName || "image"} -> ${uploadedDocImagePath}`;
     }
 
+    function updateDocChunkFileName() {
+      const fileInput = document.getElementById("docChunkFileInput");
+      const file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+      const fileNameEl = document.getElementById("docChunkFileName");
+      if (!fileNameEl) return;
+      fileNameEl.textContent = file ? String(file.name || "").trim() : "未选择文件";
+    }
+
+    function updateDocImageSelectedName() {
+      const fileInput = document.getElementById("docImageUploadInput");
+      const file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+      const fileNameEl = document.getElementById("docImageSelectedName");
+      if (!fileNameEl) return;
+      fileNameEl.textContent = file ? String(file.name || "").trim() : "未选择图片";
+    }
+
+    function chooseDocChunkFile() {
+      const fileInput = document.getElementById("docChunkFileInput");
+      if (fileInput) fileInput.click();
+    }
+
+    function chooseDocChunkImage() {
+      const fileInput = document.getElementById("docImageUploadInput");
+      if (fileInput) fileInput.click();
+    }
+
     function clearUploadedDocImage() {
       uploadedDocImagePath = "";
       uploadedDocImageName = "";
       const input = document.getElementById("docImageUploadInput");
       if (input) input.value = "";
+      updateDocImageSelectedName();
       updateDocImageUploadResult();
       clearDocChunkPreview();
     }
@@ -1062,6 +1099,7 @@ def dashboard_page_html(
     function onDocImageUploadInputChange() {
       uploadedDocImagePath = "";
       uploadedDocImageName = "";
+      updateDocImageSelectedName();
       updateDocImageUploadResult();
       clearDocChunkPreview();
     }
@@ -1314,7 +1352,7 @@ def dashboard_page_html(
       const tbody = document.getElementById("docChunkTableBody");
       if (!tbody) return;
       if (!items.length) {
-        tbody.innerHTML = "<tr><td colspan='6'>暂无数据</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='7'>暂无数据</td></tr>";
         bindDocChunkTableActions();
         return;
       }
@@ -1334,6 +1372,8 @@ def dashboard_page_html(
           : pathOrTextRaw;
         const pathOrText = escapeHtml(pathOrTextDisplay);
         const docType = escapeHtml(item.doc_type || (isImage ? "image" : "text"));
+        const rawScore = Number(item.score);
+        const scoreText = Number.isFinite(rawScore) ? rawScore.toFixed(6) : "-";
         return `
           <tr>
             <td><input type="checkbox" class="doc-row-check" data-id="${idAttr}" ${checked} /></td>
@@ -1341,6 +1381,7 @@ def dashboard_page_html(
             <td>${fileName}</td>
             <td>${pathOrText}</td>
             <td>${docType}</td>
+            <td>${escapeHtml(scoreText)}</td>
             <td><button class="btn btn-danger doc-row-delete" type="button" data-id="${idAttr}">删除</button></td>
           </tr>
         `;
@@ -1379,6 +1420,32 @@ def dashboard_page_html(
         setStatus("docTableStatus", title, true);
       } catch (err) {
         setStatus("docTableStatus", err.message || "加载失败", false);
+      }
+    }
+
+    async function testDocChunkSimilarity() {
+      const keyword = document.getElementById("docSearchKeyword").value.trim();
+      if (!keyword) {
+        setStatus("docTableStatus", "请先输入搜索内容", false);
+        return;
+      }
+
+      setStatus("docTableStatus", "向量相似度测试中...(消耗Token)", true);
+      docSelectedIds.clear();
+      try {
+        const query = new URLSearchParams({
+          content: keyword,
+          limit: "50"
+        });
+        const data = await apiRequest("GET", `/admin/api/docs-chunk/similarity?${query.toString()}`);
+        if (!data) return;
+        const items = data.items || [];
+        const total = Number(data.total || items.length || 0);
+        renderDocChunkTable(items);
+        updateDocPager(total, 1, 1);
+        setStatus("docTableStatus", `向量相似度测试完成：命中 ${items.length} 条`, true);
+      } catch (err) {
+        setStatus("docTableStatus", err.message || "向量相似度测试失败", false);
       }
     }
 
@@ -1924,7 +1991,12 @@ def dashboard_page_html(
     document.getElementById("openWebChatBtn").addEventListener("click", openWebChatPage);
     document.getElementById("previewDocChunkBtn").addEventListener("click", previewDocChunkImport);
     document.getElementById("importDocChunkBtn").addEventListener("click", importDocChunks);
-    document.getElementById("docChunkFileInput").addEventListener("change", clearDocChunkPreview);
+    document.getElementById("docChunkPickFileBtn").addEventListener("click", chooseDocChunkFile);
+    document.getElementById("docChunkPickImageBtn").addEventListener("click", chooseDocChunkImage);
+    document.getElementById("docChunkFileInput").addEventListener("change", () => {
+      updateDocChunkFileName();
+      clearDocChunkPreview();
+    });
     document.querySelectorAll('input[name="docChunkSourceMode"]').forEach((el) => {
       el.addEventListener("change", updateDocChunkSourceModeUi);
     });
@@ -1936,6 +2008,7 @@ def dashboard_page_html(
     document.getElementById("docChunkOverlap").addEventListener("input", clearDocChunkPreview);
     document.getElementById("docListRefreshBtn").addEventListener("click", () => loadDocChunkList(docCurrentPage));
     document.getElementById("docSearchBtn").addEventListener("click", () => loadDocChunkList(1));
+    document.getElementById("docSimilarityTestBtn").addEventListener("click", testDocChunkSimilarity);
     document.getElementById("docResetSearchBtn").addEventListener("click", () => {
       document.getElementById("docSearchKeyword").value = "";
       loadDocChunkList(1);
@@ -2006,6 +2079,8 @@ def dashboard_page_html(
 
     updateBatchFileName();
     updateBatchSourceModeUi();
+    updateDocChunkFileName();
+    updateDocImageSelectedName();
     updateDocImageUploadResult();
     updateDocChunkSourceModeUi();
     switchView(getActiveView());
