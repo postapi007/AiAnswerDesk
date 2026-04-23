@@ -1183,8 +1183,16 @@ def dashboard_page_html(
         const idAttr = encodeURIComponent(id);
         const checked = docSelectedIds.has(id) ? "checked" : "";
         const fileName = escapeHtml(item.file_name || item.doc_name || item.question || "");
-        const pathOrText = escapeHtml(item.file_path || item.answer || "");
-        const docType = escapeHtml(item.doc_type || (item.is_image ? "image" : "text"));
+        const docTypeRaw = String(item.doc_type || "").toLowerCase();
+        const isImage = !!item.is_image || docTypeRaw === "image";
+        const pathOrTextRaw = isImage
+          ? String(item.file_path || item.answer || "")
+          : String(item.answer || item.file_path || "");
+        const pathOrTextDisplay = pathOrTextRaw.length > 220
+          ? `${pathOrTextRaw.slice(0, 220)}...`
+          : pathOrTextRaw;
+        const pathOrText = escapeHtml(pathOrTextDisplay);
+        const docType = escapeHtml(item.doc_type || (isImage ? "image" : "text"));
         return `
           <tr>
             <td><input type="checkbox" class="doc-row-check" data-id="${idAttr}" ${checked} /></td>

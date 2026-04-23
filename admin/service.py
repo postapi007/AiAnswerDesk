@@ -1352,7 +1352,6 @@ def import_docs_chunk_entries(
         chunk_overlap=chunk_overlap,
     )
     entries = prepared["entries"]
-    docs_vector_size = _resolve_docs_vector_size()
 
     success_items: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -1367,11 +1366,9 @@ def import_docs_chunk_entries(
         is_image_entry = bool(entry.get("is_image", False))
         try:
             if is_image_entry:
-                ensure_collection_ready(
-                    docs_vector_size,
-                    collection_name=DOCS_COLLECTION_NAME,
-                )
-                vector = [0.0] * docs_vector_size
+                # 图片条目使用answer中的文件路径做向量化，便于后续按路径/文件名语义召回。
+                image_embedding_text = str(entry.get("answer", "")).strip() or chunk_text
+                vector = build_query_embedding(image_embedding_text)
             else:
                 vector = build_query_embedding(chunk_text)
             result = create_knowledge_point(
