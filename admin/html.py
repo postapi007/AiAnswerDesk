@@ -430,7 +430,8 @@ def dashboard_page_html(
               <div>2. (可以开启)未命中则走 知识库 检索 且分数 ≥ <code>__SIMILARITY_THRESHOLD__</code>；知识库 命中后会把当前问法回写到知识库</div>
               <div class="flow-arrow">↓</div>
               <div>1. (可以开启)执行LLM问答大模型，LLM问答结果自动写入知识库的开启时直写知识库，关闭时写入待审核库，需要手动通过</div>
-              <div>2. 如果请求异常，直接返回 <code>__NOT_CONFIGURED_ANSWER__</code></div>
+              <div>2. LLM自定义模版，如果包含 <code>{fragmenteddata}</code> 将会匹配知识库分片</div>
+              <div>3. 如果请求异常，直接返回 <code>__NOT_CONFIGURED_ANSWER__</code></div>
               <div class="flow-arrow">↓</div>
               <div>如果都没有命中或者LLM异常,直接返回 <code>__NOT_CONFIGURED_ANSWER__</code></div>
               <div>返回示例：</div>
