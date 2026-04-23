@@ -71,7 +71,7 @@ curl "http://127.0.0.1:8000/api/?content=怎么退款"
 * 入口：`GET /admin`
 * 登录方式：固定密码登录（配置项：`config/app.json -> admin.password`）
 * 后台代码目录：`admin/`（登录、页面、知识库管理接口都在此目录）
-* 布局：左侧菜单栏（控制台、知识库列表、知识库待审核、应答界面、LLM模版、系统设置）+ 右侧内容区
+* 布局：左侧菜单栏（控制台、知识库列表、知识库分片、知识库待审核、应答界面、LLM模版、系统设置）+ 右侧内容区
 
 后台功能：
 * 读取向量库列表（分页）：`GET /admin/api/knowledge?limit=10&page=1&collection=faq`
@@ -85,6 +85,13 @@ curl "http://127.0.0.1:8000/api/?content=怎么退款"
 * 批量新增：`POST /admin/api/knowledge/batch`
 * 批量导入预览（xlsx/txt）：`POST /admin/api/knowledge/batch/preview`
 * 批量确认导入（支持出错回滚）：`POST /admin/api/knowledge/batch/import`
+* 文档分片预览（txt/md/csv/json/jsonl/docx/xlsx + 图片png/jpg/jpeg/webp/gif/bmp/svg）：`POST /admin/api/docs-chunk/preview`
+* 文档分片导入（写入 `qdrant.docs_collection`）：`POST /admin/api/docs-chunk/import`
+* 图片上传到项目目录：`POST /admin/api/docs-chunk/upload-image`（保存到 `picture/`，可通过 `/picture/...` 访问）
+* 知识库分片管理列表：支持读取、搜索、单条删除、批量删除（集合：`qdrant.docs_collection`）
+* 图片支持仅写入“文件名+路径”（后台点击上传按钮即可，不必切片正文）
+* 分片参数建议：`chunk_size 100~1200`，`chunk_overlap 0~300`
+* 说明：向量维度（如1024）与文本切片长度不是同一个概念，不需要一一对应
 * 通过待审核并写入知识库：`POST /admin/api/pending/{point_id}/approve`
 * 独立菜单“LLM模版”中编辑 LLM 自定义模版（包含 `{content}` 占位符）
 * 读取系统设置：`GET /admin/api/settings/app`
@@ -114,7 +121,7 @@ curl "http://127.0.0.1:8000/api/?content=怎么退款"
 * 后台地址：`http://127.0.0.1:6333/dashboard`
 * 知识库集合名（表名）：`faq`（来自 `config/app.json` 的 `qdrant.collection`）
 * 审核知识库集合名（表名）：`pending_kb`（来自 `config/app.json` 的 `qdrant.pending_collection`）
-* 分片知识库集合名（表名）：`kb_docs_v1`
+* 分片知识库集合名（表名）：`kb_docs_v1`（来自 `config/app.json` 的 `qdrant.docs_collection`）
 * http://127.0.0.1:6333/dashboard#/console  执行创建集合
 ```json
 PUT /collections/faq

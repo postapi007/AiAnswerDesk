@@ -127,6 +127,7 @@ def dashboard_page_html(
     not_configured_answer: str,
     faq_collection: str,
     pending_collection: str,
+    docs_collection: str,
 ) -> str:
     html_text = """<!doctype html>
 <html lang="zh-CN">
@@ -402,6 +403,7 @@ def dashboard_page_html(
       <div class="menu">
         <button class="menu-btn active" id="menuConsole" type="button">控制台</button>
         <button class="menu-btn" id="menuKnowledge" type="button">知识库列表</button>
+        <button class="menu-btn" id="menuDocChunk" type="button">知识库分片</button>
         <button class="menu-btn" id="menuPending" type="button">知识库待审核</button>
         <button class="menu-btn" id="menuWebReply" type="button">应答界面</button>
         <button class="menu-btn" id="menuLlmTemplate" type="button">LLM模版</button>
@@ -520,6 +522,92 @@ def dashboard_page_html(
         </section>
       </section>
 
+      <section class="view" id="docChunkView">
+        <section class="card">
+          <h2>知识库分片</h2>
+          <p class="muted">目标集合：<code>__DOCS_COLLECTION__</code>，支持导入文件切片后写入向量库。</p>
+          <p class="muted">支持格式：.txt / .md / .markdown / .csv / .json / .jsonl / .docx / .xlsx / 图片（png/jpg/jpeg/webp/gif/bmp/svg）</p>
+        </section>
+
+        <section class="card">
+          <label for="docChunkFileInput">上传文件（优先使用）</label>
+          <input id="docChunkFileInput" type="file" accept=".txt,.md,.markdown,.csv,.json,.jsonl,.docx,.xlsx,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" />
+          <div class="file-hint">如果上传了文件，优先读取文件；否则读取下方文本内容。</div>
+
+          <label for="docImageUploadInput" style="margin-top:10px;">图片上传（上传到项目 /picture）</label>
+          <input id="docImageUploadInput" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" />
+          <div class="btn-row">
+            <button class="btn" id="uploadDocImageBtn" type="button">上传图片到 /picture</button>
+            <button class="btn" id="clearUploadedDocImageBtn" type="button">清空已上传图片</button>
+          </div>
+          <div class="preview-meta" id="docImageUploadResult">未上传图片</div>
+
+          <label for="docChunkContent" style="margin-top:10px;">或粘贴文档内容</label>
+          <textarea id="docChunkContent" placeholder="在这里粘贴需要切片的文档内容"></textarea>
+
+          <div class="grid-two" style="margin-top:10px;">
+            <div>
+              <label for="docChunkSize">切片长度（100~1200）</label>
+              <input id="docChunkSize" type="number" min="100" max="1200" step="1" value="300" />
+            </div>
+            <div>
+              <label for="docChunkOverlap">切片重叠（0~300）</label>
+              <input id="docChunkOverlap" type="number" min="0" max="300" step="1" value="60" />
+            </div>
+          </div>
+
+          <div class="switch-row">
+            <input id="docChunkRollbackOnError" type="checkbox" checked />
+            <label for="docChunkRollbackOnError" style="margin:0;">导入出错时回滚已写入数据</label>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn" id="previewDocChunkBtn" type="button">切片预览</button>
+            <button class="btn" id="importDocChunkBtn" type="button">确认导入</button>
+          </div>
+          <div class="status" id="docChunkStatus"></div>
+
+          <div class="preview-box" id="docChunkPreviewBox" style="display:none;">
+            <div class="preview-meta" id="docChunkPreviewSummary"></div>
+            <div class="preview-meta" id="docChunkPreviewSample"></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>分片管理列表</h2>
+          <div class="toolbar">
+            <div class="search-box">
+              <input id="docSearchKeyword" placeholder="输入关键字搜索（文件名/路径/内容/id）" />
+              <button class="btn" id="docSearchBtn" type="button">搜索</button>
+              <button class="btn" id="docResetSearchBtn" type="button">重置</button>
+            </div>
+            <div class="btn-row" style="margin-top:0;">
+              <button class="btn" id="docListRefreshBtn" type="button">刷新</button>
+              <button class="btn btn-danger" id="docBatchDeleteBtn" type="button">批量删除勾选</button>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th class="col-check"><input id="docSelectAllCheckbox" type="checkbox" /></th>
+                <th class="col-id">ID</th>
+                <th class="col-q">文件名</th>
+                <th class="col-a">路径/内容</th>
+                <th class="col-score">类型</th>
+                <th class="col-op">操作</th>
+              </tr>
+            </thead>
+            <tbody id="docChunkTableBody"></tbody>
+          </table>
+          <div class="status" id="docTableStatus"></div>
+          <div class="pager">
+            <button class="btn" id="docPrevPageBtn" type="button">上一页</button>
+            <button class="btn" id="docNextPageBtn" type="button">下一页</button>
+            <div class="pager-info" id="docPageInfo">第 1 / 1 页，共 0 条</div>
+          </div>
+        </section>
+      </section>
+
       <section class="view" id="llmTemplateView">
         <section class="card">
           <h2>LLM自定义模版</h2>
@@ -608,15 +696,22 @@ def dashboard_page_html(
     const FAQ_COLLECTION = "__FAQ_COLLECTION__";
     const PENDING_COLLECTION = "__PENDING_COLLECTION__";
     const VIEW_STORAGE_KEY = "admin_active_view";
-    const ALLOWED_VIEWS = new Set(["console", "knowledge", "pending", "webReply", "llmTemplate", "settings"]);
+    const ALLOWED_VIEWS = new Set(["console", "knowledge", "docChunk", "pending", "webReply", "llmTemplate", "settings"]);
     let currentPage = 1;
     let totalPages = 0;
     let knowledgeLoaded = false;
     let settingsLoaded = false;
     let qaTemplateLoaded = false;
     let webReplyLoaded = false;
+    let docChunkLoaded = false;
     let batchPreviewEntries = [];
+    let docChunkImportPayload = null;
+    let uploadedDocImagePath = "";
+    let uploadedDocImageName = "";
     let activeKnowledgeCollection = FAQ_COLLECTION;
+    const docSelectedIds = new Set();
+    let docCurrentPage = 1;
+    let docTotalPages = 0;
 
     function saveActiveView(view) {
       if (!ALLOWED_VIEWS.has(view)) return;
@@ -677,11 +772,13 @@ def dashboard_page_html(
 
       const consoleView = document.getElementById("consoleView");
       const knowledgeView = document.getElementById("knowledgeView");
+      const docChunkView = document.getElementById("docChunkView");
       const webReplyView = document.getElementById("webReplyView");
       const llmTemplateView = document.getElementById("llmTemplateView");
       const settingsView = document.getElementById("settingsView");
       const menuConsole = document.getElementById("menuConsole");
       const menuKnowledge = document.getElementById("menuKnowledge");
+      const menuDocChunk = document.getElementById("menuDocChunk");
       const menuPending = document.getElementById("menuPending");
       const menuWebReply = document.getElementById("menuWebReply");
       const menuLlmTemplate = document.getElementById("menuLlmTemplate");
@@ -689,11 +786,13 @@ def dashboard_page_html(
 
       if (consoleView) consoleView.classList.toggle("active", safeView === "console");
       if (knowledgeView) knowledgeView.classList.toggle("active", safeView === "knowledge" || safeView === "pending");
+      if (docChunkView) docChunkView.classList.toggle("active", safeView === "docChunk");
       if (webReplyView) webReplyView.classList.toggle("active", safeView === "webReply");
       if (llmTemplateView) llmTemplateView.classList.toggle("active", safeView === "llmTemplate");
       if (settingsView) settingsView.classList.toggle("active", safeView === "settings");
       if (menuConsole) menuConsole.classList.toggle("active", safeView === "console");
       if (menuKnowledge) menuKnowledge.classList.toggle("active", safeView === "knowledge");
+      if (menuDocChunk) menuDocChunk.classList.toggle("active", safeView === "docChunk");
       if (menuPending) menuPending.classList.toggle("active", safeView === "pending");
       if (menuWebReply) menuWebReply.classList.toggle("active", safeView === "webReply");
       if (menuLlmTemplate) menuLlmTemplate.classList.toggle("active", safeView === "llmTemplate");
@@ -711,6 +810,10 @@ def dashboard_page_html(
           selectedIds.clear();
           loadKnowledgeList(1);
         }
+      }
+      if (safeView === "docChunk" && !docChunkLoaded) {
+        docChunkLoaded = true;
+        loadDocChunkList(1);
       }
       if (safeView === "llmTemplate" && !qaTemplateLoaded) {
         qaTemplateLoaded = true;
@@ -794,6 +897,370 @@ def dashboard_page_html(
         reader.onerror = () => reject(new Error("文件读取失败"));
         reader.readAsDataURL(file);
       });
+    }
+
+    function clearDocChunkPreview() {
+      docChunkImportPayload = null;
+      const box = document.getElementById("docChunkPreviewBox");
+      const summary = document.getElementById("docChunkPreviewSummary");
+      const sample = document.getElementById("docChunkPreviewSample");
+      if (box) box.style.display = "none";
+      if (summary) summary.textContent = "";
+      if (sample) sample.textContent = "";
+    }
+
+    function updateDocImageUploadResult() {
+      const el = document.getElementById("docImageUploadResult");
+      if (!el) return;
+      if (!uploadedDocImagePath) {
+        el.textContent = "未上传图片";
+        return;
+      }
+      el.textContent = `已上传：${uploadedDocImageName || "image"} -> ${uploadedDocImagePath}`;
+    }
+
+    function clearUploadedDocImage() {
+      uploadedDocImagePath = "";
+      uploadedDocImageName = "";
+      const input = document.getElementById("docImageUploadInput");
+      if (input) input.value = "";
+      updateDocImageUploadResult();
+      clearDocChunkPreview();
+    }
+
+    function onDocImageUploadInputChange() {
+      uploadedDocImagePath = "";
+      uploadedDocImageName = "";
+      updateDocImageUploadResult();
+      clearDocChunkPreview();
+    }
+
+    async function uploadDocImageToPicture() {
+      const input = document.getElementById("docImageUploadInput");
+      const file = input && input.files && input.files.length ? input.files[0] : null;
+      if (!file) {
+        setStatus("docChunkStatus", "请先选择图片文件", false);
+        return;
+      }
+      const lower = String(file.name || "").toLowerCase();
+      const allowed = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"];
+      if (!allowed.some((suffix) => lower.endsWith(suffix))) {
+        setStatus("docChunkStatus", "仅支持图片格式：png/jpg/jpeg/webp/gif/bmp/svg", false);
+        return;
+      }
+
+      setStatus("docChunkStatus", "图片上传中...", true);
+      try {
+        const fileContentBase64 = await readFileAsBase64(file);
+        const data = await apiRequest("POST", "/admin/api/docs-chunk/upload-image", {
+          file_name: String(file.name || "").trim(),
+          file_content_base64: fileContentBase64
+        });
+        if (!data) return;
+        uploadedDocImagePath = String(data.file_path || "").trim();
+        uploadedDocImageName = String(data.file_name || file.name || "").trim();
+        if (!uploadedDocImagePath) {
+          throw new Error("上传成功但未返回文件路径");
+        }
+        updateDocImageUploadResult();
+        clearDocChunkPreview();
+        setStatus("docChunkStatus", "图片上传成功", true);
+      } catch (err) {
+        setStatus("docChunkStatus", err.message || "图片上传失败", false);
+      }
+    }
+
+    async function buildDocChunkPayload() {
+      const fileInput = document.getElementById("docChunkFileInput");
+      const file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+      const content = document.getElementById("docChunkContent").value || "";
+      const chunkSize = Number(document.getElementById("docChunkSize").value);
+      const chunkOverlap = Number(document.getElementById("docChunkOverlap").value);
+      const imagePath = uploadedDocImagePath;
+
+      if (!file && !content.trim() && !imagePath) {
+        throw new Error("请上传文件、粘贴文档内容或先上传图片");
+      }
+      if (!Number.isInteger(chunkSize) || chunkSize < 100 || chunkSize > 1200) {
+        throw new Error("切片长度必须是 100~1200 的整数");
+      }
+      if (!Number.isInteger(chunkOverlap) || chunkOverlap < 0 || chunkOverlap > 300) {
+        throw new Error("切片重叠必须是 0~300 的整数");
+      }
+      if (chunkOverlap >= chunkSize) {
+        throw new Error("切片重叠必须小于切片长度");
+      }
+
+      const body = {
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap
+      };
+      if (file) {
+        const fileName = String(file.name || "").trim();
+        const lower = fileName.toLowerCase();
+        const supported = [
+          ".txt",
+          ".md",
+          ".markdown",
+          ".csv",
+          ".json",
+          ".jsonl",
+          ".docx",
+          ".xlsx",
+          ".png",
+          ".jpg",
+          ".jpeg",
+          ".webp",
+          ".gif",
+          ".bmp",
+          ".svg"
+        ];
+        const isSupported = supported.some((suffix) => lower.endsWith(suffix));
+        if (!isSupported) {
+          throw new Error("文件类型不支持");
+        }
+        const isImage = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"]
+          .some((suffix) => lower.endsWith(suffix));
+        if (isImage) {
+          if (!uploadedDocImagePath) {
+            throw new Error("图片文件请先点击“上传图片到 /picture”");
+          }
+          body.file_name = uploadedDocImageName || fileName;
+        } else {
+          body.file_name = fileName;
+          body.file_content_base64 = await readFileAsBase64(file);
+        }
+      } else {
+        body.content = content;
+      }
+      if (imagePath) {
+        body.image_path = imagePath;
+        if (!body.file_name && uploadedDocImageName) {
+          body.file_name = uploadedDocImageName;
+        }
+      }
+      return body;
+    }
+
+    function renderDocChunkPreview(data) {
+      const box = document.getElementById("docChunkPreviewBox");
+      const summary = document.getElementById("docChunkPreviewSummary");
+      const sample = document.getElementById("docChunkPreviewSample");
+      if (!box || !summary || !sample) return;
+
+      const totalChunks = Number(data.total_chunks || 0);
+      const sourceChars = Number(data.source_chars || 0);
+      const chunkSize = Number(data.chunk_size || 0);
+      const chunkOverlap = Number(data.chunk_overlap || 0);
+      if (data.is_image) {
+        summary.textContent = `预览完成：图片模式，记录 ${totalChunks} 条（文件名/路径入库）`;
+      } else {
+        summary.textContent = `预览完成：文本 ${sourceChars} 字，切片 ${totalChunks} 条，chunk_size=${chunkSize}，chunk_overlap=${chunkOverlap}`;
+      }
+
+      const previewChunks = Array.isArray(data.preview_chunks) ? data.preview_chunks : [];
+      if (!previewChunks.length) {
+        sample.textContent = "";
+      } else {
+        const lines = previewChunks.slice(0, 3).map((item) => {
+          const idx = Number(item.index || 0);
+          const chars = Number(item.chars || 0);
+          const preview = String(item.preview || "").replace(/\s+/g, " ").trim();
+          return `#${idx} (${chars}字): ${preview}`;
+        });
+        sample.textContent = lines.join("\\n");
+      }
+      box.style.display = "block";
+    }
+
+    async function previewDocChunkImport() {
+      setStatus("docChunkStatus", "切片预览中...", true);
+      clearDocChunkPreview();
+      try {
+        const payload = await buildDocChunkPayload();
+        payload.max_preview = 20;
+        const data = await apiRequest("POST", "/admin/api/docs-chunk/preview", payload);
+        if (!data) return;
+        delete payload.max_preview;
+        docChunkImportPayload = payload;
+        renderDocChunkPreview(data);
+        setStatus("docChunkStatus", `预览完成：共 ${data.total_chunks || 0} 条切片`, true);
+      } catch (err) {
+        setStatus("docChunkStatus", err.message || "切片预览失败", false);
+      }
+    }
+
+    async function importDocChunks() {
+      if (!docChunkImportPayload) {
+        setStatus("docChunkStatus", "请先执行切片预览，再确认导入", false);
+        return;
+      }
+      const rollbackOnError = !!document.getElementById("docChunkRollbackOnError").checked;
+      setStatus("docChunkStatus", "导入中...", true);
+      try {
+        const payload = {
+          ...docChunkImportPayload,
+          rollback_on_error: rollbackOnError
+        };
+        const data = await apiRequest("POST", "/admin/api/docs-chunk/import", payload);
+        if (!data) return;
+        const rolledBack = !!data.rolled_back;
+        const rollbackError = String(data.rollback_error || "");
+        let msg = `总切片 ${data.total_chunks}，成功 ${data.success}，失败 ${data.failed}`;
+        if (rolledBack) msg += "，已回滚";
+        if (rollbackError) msg += `，回滚异常：${rollbackError}`;
+        setStatus("docChunkStatus", msg, data.failed === 0 || (rolledBack && !rollbackError));
+        await loadDocChunkList(1);
+      } catch (err) {
+        setStatus("docChunkStatus", err.message || "切片导入失败", false);
+      }
+    }
+
+    function updateDocSelectAllState() {
+      const selectAll = document.getElementById("docSelectAllCheckbox");
+      const rowChecks = Array.from(document.querySelectorAll(".doc-row-check"));
+      if (!selectAll) return;
+      if (!rowChecks.length) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+        return;
+      }
+      const checkedCount = rowChecks.filter((el) => el.checked).length;
+      selectAll.checked = checkedCount === rowChecks.length;
+      selectAll.indeterminate = checkedCount > 0 && checkedCount < rowChecks.length;
+    }
+
+    function updateDocPager(total, page, pages) {
+      docTotalPages = pages || 0;
+      docCurrentPage = page || 1;
+      const prevBtn = document.getElementById("docPrevPageBtn");
+      const nextBtn = document.getElementById("docNextPageBtn");
+      const info = document.getElementById("docPageInfo");
+      if (prevBtn) prevBtn.disabled = docCurrentPage <= 1 || docTotalPages === 0;
+      if (nextBtn) nextBtn.disabled = docTotalPages === 0 || docCurrentPage >= docTotalPages;
+      if (info) {
+        const safeTotalPages = docTotalPages || 1;
+        info.textContent = `第 ${docCurrentPage} / ${safeTotalPages} 页，共 ${total} 条`;
+      }
+    }
+
+    function bindDocChunkTableActions() {
+      document.querySelectorAll(".doc-row-check").forEach((el) => {
+        el.addEventListener("change", () => {
+          const id = decodeURIComponent(el.getAttribute("data-id") || "");
+          if (!id) return;
+          if (el.checked) {
+            docSelectedIds.add(id);
+          } else {
+            docSelectedIds.delete(id);
+          }
+          updateDocSelectAllState();
+        });
+      });
+
+      document.querySelectorAll(".doc-row-delete").forEach((el) => {
+        el.addEventListener("click", () => {
+          const id = decodeURIComponent(el.getAttribute("data-id") || "");
+          if (!id) return;
+          deleteDocChunkPoint(id);
+        });
+      });
+
+      updateDocSelectAllState();
+    }
+
+    function renderDocChunkTable(items) {
+      const tbody = document.getElementById("docChunkTableBody");
+      if (!tbody) return;
+      if (!items.length) {
+        tbody.innerHTML = "<tr><td colspan='6'>暂无数据</td></tr>";
+        bindDocChunkTableActions();
+        return;
+      }
+
+      tbody.innerHTML = items.map((item) => {
+        const id = String(item.id ?? "");
+        const idAttr = encodeURIComponent(id);
+        const checked = docSelectedIds.has(id) ? "checked" : "";
+        const fileName = escapeHtml(item.file_name || item.doc_name || item.question || "");
+        const pathOrText = escapeHtml(item.file_path || item.answer || "");
+        const docType = escapeHtml(item.doc_type || (item.is_image ? "image" : "text"));
+        return `
+          <tr>
+            <td><input type="checkbox" class="doc-row-check" data-id="${idAttr}" ${checked} /></td>
+            <td>${escapeHtml(id)}</td>
+            <td>${fileName}</td>
+            <td>${pathOrText}</td>
+            <td>${docType}</td>
+            <td><button class="btn btn-danger doc-row-delete" type="button" data-id="${idAttr}">删除</button></td>
+          </tr>
+        `;
+      }).join("");
+
+      bindDocChunkTableActions();
+    }
+
+    async function loadDocChunkList(targetPage) {
+      setStatus("docTableStatus", "加载中...", true);
+      docSelectedIds.clear();
+      try {
+        if (typeof targetPage === "number" && targetPage > 0) {
+          docCurrentPage = targetPage;
+        }
+        const keyword = document.getElementById("docSearchKeyword").value.trim();
+        const query = new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          page: String(docCurrentPage),
+          collection: "__DOCS_COLLECTION__"
+        });
+        if (keyword) query.set("keyword", keyword);
+        const data = await apiRequest("GET", `/admin/api/knowledge?${query.toString()}`);
+        if (!data) return;
+        const items = data.items || [];
+        const total = Number(data.total || 0);
+        const pages = Number(data.total_pages || 0);
+        if (pages > 0 && docCurrentPage > pages) {
+          return loadDocChunkList(pages);
+        }
+        renderDocChunkTable(items);
+        updateDocPager(total, Number(data.page || docCurrentPage), pages);
+        const title = keyword
+          ? `分片搜索结果 ${total} 条，本页 ${items.length} 条`
+          : `分片共 ${total} 条，本页 ${items.length} 条`;
+        setStatus("docTableStatus", title, true);
+      } catch (err) {
+        setStatus("docTableStatus", err.message || "加载失败", false);
+      }
+    }
+
+    async function deleteDocChunkPoint(id) {
+      if (!confirm(`确认删除分片 ID=${id} ?`)) return;
+      try {
+        const query = new URLSearchParams({ collection: "__DOCS_COLLECTION__" });
+        await apiRequest("DELETE", `/admin/api/knowledge/${encodeURIComponent(id)}?${query.toString()}`);
+        docSelectedIds.delete(id);
+        await loadDocChunkList(docCurrentPage);
+      } catch (err) {
+        setStatus("docTableStatus", err.message || "删除失败", false);
+      }
+    }
+
+    async function batchDeleteDocChunkSelected() {
+      if (docSelectedIds.size === 0) {
+        setStatus("docTableStatus", "请先勾选要删除的分片记录", false);
+        return;
+      }
+      const ids = Array.from(docSelectedIds);
+      if (!confirm(`确认批量删除 ${ids.length} 条分片记录？`)) return;
+      try {
+        const query = new URLSearchParams({ collection: "__DOCS_COLLECTION__" });
+        const data = await apiRequest("POST", `/admin/api/knowledge/batch-delete?${query.toString()}`, { ids });
+        if (!data) return;
+        setStatus("docTableStatus", `批量删除成功：${data.deleted_count} 条`, true);
+        await loadDocChunkList(docCurrentPage);
+      } catch (err) {
+        setStatus("docTableStatus", err.message || "批量删除失败", false);
+      }
     }
 
     async function apiRequest(method, url, body) {
@@ -1242,6 +1709,7 @@ def dashboard_page_html(
     document.getElementById("batchContent").addEventListener("input", clearBatchPreview);
     document.getElementById("menuConsole").addEventListener("click", () => switchView("console"));
     document.getElementById("menuKnowledge").addEventListener("click", () => switchView("knowledge"));
+    document.getElementById("menuDocChunk").addEventListener("click", () => switchView("docChunk"));
     document.getElementById("menuPending").addEventListener("click", () => switchView("pending"));
     document.getElementById("menuWebReply").addEventListener("click", () => switchView("webReply"));
     document.getElementById("menuLlmTemplate").addEventListener("click", () => switchView("llmTemplate"));
@@ -1253,6 +1721,49 @@ def dashboard_page_html(
     document.getElementById("reloadWebReplyBtn").addEventListener("click", loadWebReplySettings);
     document.getElementById("saveWebReplyBtn").addEventListener("click", saveWebReplySettings);
     document.getElementById("openWebChatBtn").addEventListener("click", openWebChatPage);
+    document.getElementById("previewDocChunkBtn").addEventListener("click", previewDocChunkImport);
+    document.getElementById("importDocChunkBtn").addEventListener("click", importDocChunks);
+    document.getElementById("docChunkFileInput").addEventListener("change", clearDocChunkPreview);
+    document.getElementById("docImageUploadInput").addEventListener("change", onDocImageUploadInputChange);
+    document.getElementById("uploadDocImageBtn").addEventListener("click", uploadDocImageToPicture);
+    document.getElementById("clearUploadedDocImageBtn").addEventListener("click", clearUploadedDocImage);
+    document.getElementById("docChunkContent").addEventListener("input", clearDocChunkPreview);
+    document.getElementById("docChunkSize").addEventListener("input", clearDocChunkPreview);
+    document.getElementById("docChunkOverlap").addEventListener("input", clearDocChunkPreview);
+    document.getElementById("docListRefreshBtn").addEventListener("click", () => loadDocChunkList(docCurrentPage));
+    document.getElementById("docSearchBtn").addEventListener("click", () => loadDocChunkList(1));
+    document.getElementById("docResetSearchBtn").addEventListener("click", () => {
+      document.getElementById("docSearchKeyword").value = "";
+      loadDocChunkList(1);
+    });
+    document.getElementById("docBatchDeleteBtn").addEventListener("click", batchDeleteDocChunkSelected);
+    document.getElementById("docSearchKeyword").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        loadDocChunkList(1);
+      }
+    });
+    document.getElementById("docPrevPageBtn").addEventListener("click", () => {
+      if (docCurrentPage > 1) loadDocChunkList(docCurrentPage - 1);
+    });
+    document.getElementById("docNextPageBtn").addEventListener("click", () => {
+      if (docTotalPages === 0 || docCurrentPage >= docTotalPages) return;
+      loadDocChunkList(docCurrentPage + 1);
+    });
+    document.getElementById("docSelectAllCheckbox").addEventListener("change", (e) => {
+      const checked = !!e.target.checked;
+      document.querySelectorAll(".doc-row-check").forEach((el) => {
+        el.checked = checked;
+        const id = decodeURIComponent(el.getAttribute("data-id") || "");
+        if (!id) return;
+        if (checked) {
+          docSelectedIds.add(id);
+        } else {
+          docSelectedIds.delete(id);
+        }
+      });
+      updateDocSelectAllState();
+    });
     document.getElementById("logoutBtn").addEventListener("click", logout);
     document.getElementById("listRefreshBtn").addEventListener("click", () => loadKnowledgeList(currentPage));
     document.getElementById("searchBtn").addEventListener("click", () => loadKnowledgeList(1));
@@ -1289,6 +1800,7 @@ def dashboard_page_html(
       updateSelectAllState();
     });
 
+    updateDocImageUploadResult();
     switchView(getActiveView());
   </script>
 </body>
@@ -1300,4 +1812,5 @@ def dashboard_page_html(
         .replace("__NOT_CONFIGURED_ANSWER__", escape(not_configured_answer))
         .replace("__FAQ_COLLECTION__", escape(faq_collection))
         .replace("__PENDING_COLLECTION__", escape(pending_collection))
+        .replace("__DOCS_COLLECTION__", escape(docs_collection))
     )

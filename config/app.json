@@ -3,6 +3,7 @@
     "url": "http://127.0.0.1:3333", // Qdrant 服务地址
     "collection": "faq", // 集合名（你的 FAQ 集合）
     "pending_collection": "pending_kb", // 待审核集合名（LLM结果待人工通过）
+    "docs_collection": "kb_docs_v1", // 文档分片集合名（导入文件切片后写入）
     "timeout_seconds": 5 // 请求超时（秒）
   },
   "embedding": {

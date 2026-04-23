@@ -15,6 +15,7 @@ class AppSettings:
     qdrant_url: str
     qdrant_collection: str
     qdrant_pending_collection: str
+    qdrant_docs_collection: str
     qdrant_timeout_seconds: int
     embedding_base_url: str
     embedding_model: str
@@ -170,6 +171,11 @@ def load_settings(config_path: Path = CONFIG_FILE_PATH) -> AppSettings:
         os.getenv("QDRANT_PENDING_COLLECTION", qdrant_pending_collection).strip() or "pending_kb"
     )
 
+    qdrant_docs_collection = str(qdrant.get("docs_collection", "kb_docs_v1")).strip() or "kb_docs_v1"
+    qdrant_docs_collection = (
+        os.getenv("QDRANT_DOCS_COLLECTION", qdrant_docs_collection).strip() or "kb_docs_v1"
+    )
+
     qdrant_timeout_seconds = max(_to_int(qdrant.get("timeout_seconds", 5), 5), 1)
     qdrant_timeout_seconds = max(
         _to_int(os.getenv("QDRANT_TIMEOUT_SECONDS", qdrant_timeout_seconds), qdrant_timeout_seconds),
@@ -313,6 +319,7 @@ def load_settings(config_path: Path = CONFIG_FILE_PATH) -> AppSettings:
         qdrant_url=qdrant_url,
         qdrant_collection=qdrant_collection,
         qdrant_pending_collection=qdrant_pending_collection,
+        qdrant_docs_collection=qdrant_docs_collection,
         qdrant_timeout_seconds=qdrant_timeout_seconds,
         embedding_base_url=embedding_base_url,
         embedding_model=embedding_model,

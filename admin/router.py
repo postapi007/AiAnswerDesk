@@ -21,6 +21,7 @@ from .auth import (
 )
 from .html import dashboard_page_html, login_page_html
 from .service import (
+    DOCS_COLLECTION_NAME,
     FAQ_COLLECTION,
     PENDING_COLLECTION_NAME,
     approve_pending_knowledge_point,
@@ -30,9 +31,12 @@ from .service import (
     delete_knowledge_point,
     get_app_api_settings,
     get_qa_prompt_template,
+    import_docs_chunk_entries,
     import_batch_knowledge,
     list_knowledge_points,
+    preview_docs_chunk_import,
     preview_batch_knowledge,
+    save_uploaded_image_to_picture,
     update_app_api_settings,
     update_qa_prompt_template,
 )
@@ -75,6 +79,31 @@ class AdminBatchImportConfirmRequest(BaseModel):
     rollback_on_error: bool = Field(default=True)
 
 
+class AdminDocsChunkPreviewRequest(BaseModel):
+    content: str = Field(default="")
+    file_name: str = Field(default="")
+    file_content_base64: str = Field(default="")
+    image_path: str = Field(default="")
+    chunk_size: int = Field(default=300, ge=100, le=1200)
+    chunk_overlap: int = Field(default=60, ge=0, le=300)
+    max_preview: int = Field(default=20, ge=1, le=50)
+
+
+class AdminDocsChunkImportRequest(BaseModel):
+    content: str = Field(default="")
+    file_name: str = Field(default="")
+    file_content_base64: str = Field(default="")
+    image_path: str = Field(default="")
+    chunk_size: int = Field(default=300, ge=100, le=1200)
+    chunk_overlap: int = Field(default=60, ge=0, le=300)
+    rollback_on_error: bool = Field(default=True)
+
+
+class AdminUploadImageRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+    file_content_base64: str = Field(..., min_length=1)
+
+
 class AdminApiSettingsRequest(BaseModel):
     similarity_threshold: float = Field(..., ge=0, le=1)
     min_embedding_chars: int = Field(..., ge=1)
@@ -106,6 +135,7 @@ def admin_home(request: Request):
                 not_configured_answer=runtime.not_configured_answer,
                 faq_collection=runtime.qdrant_collection,
                 pending_collection=runtime.qdrant_pending_collection,
+                docs_collection=runtime.qdrant_docs_collection,
             )
         )
     return HTMLResponse(login_page_html())
@@ -140,7 +170,7 @@ def admin_list_knowledge(
     keyword: str = Query("", description="关键字搜索（问题/答案/id）"),
     collection: str = Query(
         FAQ_COLLECTION,
-        description=f"集合名（{FAQ_COLLECTION}/{PENDING_COLLECTION_NAME}）",
+        description=f"集合名（{FAQ_COLLECTION}/{DOCS_COLLECTION_NAME}/{PENDING_COLLECTION_NAME}）",
     ),
 ):
     require_admin(request)
@@ -164,7 +194,7 @@ def admin_delete_knowledge(
     point_id: str,
     collection: str = Query(
         FAQ_COLLECTION,
-        description=f"集合名（{FAQ_COLLECTION}/{PENDING_COLLECTION_NAME}）",
+        description=f"集合名（{FAQ_COLLECTION}/{DOCS_COLLECTION_NAME}/{PENDING_COLLECTION_NAME}）",
     ),
 ):
     require_admin(request)
@@ -198,13 +228,50 @@ def admin_batch_import_confirm(request: Request, payload: AdminBatchImportConfir
     )
 
 
+@router.post("/admin/api/docs-chunk/preview")
+def admin_docs_chunk_preview(request: Request, payload: AdminDocsChunkPreviewRequest):
+    require_admin(request)
+    return preview_docs_chunk_import(
+        content=payload.content,
+        file_name=payload.file_name,
+        file_content_base64=payload.file_content_base64,
+        image_path=payload.image_path,
+        chunk_size=payload.chunk_size,
+        chunk_overlap=payload.chunk_overlap,
+        max_preview=payload.max_preview,
+    )
+
+
+@router.post("/admin/api/docs-chunk/import")
+def admin_docs_chunk_import(request: Request, payload: AdminDocsChunkImportRequest):
+    require_admin(request)
+    return import_docs_chunk_entries(
+        content=payload.content,
+        file_name=payload.file_name,
+        file_content_base64=payload.file_content_base64,
+        image_path=payload.image_path,
+        chunk_size=payload.chunk_size,
+        chunk_overlap=payload.chunk_overlap,
+        rollback_on_error=payload.rollback_on_error,
+    )
+
+
+@router.post("/admin/api/docs-chunk/upload-image")
+def admin_docs_chunk_upload_image(request: Request, payload: AdminUploadImageRequest):
+    require_admin(request)
+    return save_uploaded_image_to_picture(
+        file_name=payload.file_name,
+        file_content_base64=payload.file_content_base64,
+    )
+
+
 @router.post("/admin/api/knowledge/batch-delete")
 def admin_batch_delete(
     request: Request,
     payload: AdminBatchDeleteRequest,
     collection: str = Query(
         FAQ_COLLECTION,
-        description=f"集合名（{FAQ_COLLECTION}/{PENDING_COLLECTION_NAME}）",
+        description=f"集合名（{FAQ_COLLECTION}/{DOCS_COLLECTION_NAME}/{PENDING_COLLECTION_NAME}）",
     ),
 ):
     require_admin(request)

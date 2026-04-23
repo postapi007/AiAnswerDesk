@@ -27,7 +27,19 @@ from config.settings import CONFIG_FILE_PATH, _strip_json_comments, load_setting
 
 FAQ_COLLECTION = SETTINGS.qdrant_collection
 PENDING_COLLECTION_NAME = PENDING_COLLECTION
-ALLOWED_ADMIN_COLLECTIONS = {FAQ_COLLECTION, PENDING_COLLECTION_NAME}
+DOCS_COLLECTION_NAME = SETTINGS.qdrant_docs_collection
+ALLOWED_ADMIN_COLLECTIONS = {FAQ_COLLECTION, PENDING_COLLECTION_NAME, DOCS_COLLECTION_NAME}
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PICTURE_DIR = PROJECT_ROOT / "picture"
+IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".svg",
+}
 
 
 def _normalize_admin_collection_name(
@@ -70,6 +82,13 @@ def _serialize_point(point: dict[str, Any]) -> dict[str, Any]:
         cached_from_score = float(raw_cached_from_score)
     except (TypeError, ValueError):
         cached_from_score = 1.0
+    file_path = str(payload.get("file_path", "")).strip()
+    file_name = str(payload.get("file_name", "")).strip()
+    if not file_name and file_path:
+        file_name = file_path.replace("\\", "/").split("/")[-1]
+    doc_name = str(payload.get("doc_name", "")).strip()
+    if not file_name:
+        file_name = doc_name
     return {
         "id": point.get("id"),
         "question": str(payload.get("question", "")).strip(),
@@ -78,6 +97,13 @@ def _serialize_point(point: dict[str, Any]) -> dict[str, Any]:
         "status": str(payload.get("status", "")).strip(),
         "cache_type": str(payload.get("cache_type", "")).strip(),
         "cached_from_score": cached_from_score,
+        "doc_type": str(payload.get("doc_type", "")).strip(),
+        "doc_name": doc_name,
+        "file_name": file_name,
+        "saved_file_name": str(payload.get("saved_file_name", "")).strip(),
+        "file_path": file_path,
+        "is_image": bool(payload.get("is_image", False)),
+        "chunk_chars": int(payload.get("chunk_chars", 0) or 0),
     }
 
 
@@ -103,12 +129,20 @@ def _match_keyword(item: dict[str, Any], keyword: str, normalized_keyword: str) 
     answer = str(item.get("answer", ""))
     normalized_question = str(item.get("normalized_question", ""))
     point_id = str(item.get("id", ""))
+    file_name = str(item.get("file_name", ""))
+    saved_file_name = str(item.get("saved_file_name", ""))
+    file_path = str(item.get("file_path", ""))
+    doc_name = str(item.get("doc_name", ""))
 
     if keyword:
         if (
             _contains_casefold(question, keyword)
             or _contains_casefold(answer, keyword)
             or _contains_casefold(point_id, keyword)
+            or _contains_casefold(file_name, keyword)
+            or _contains_casefold(saved_file_name, keyword)
+            or _contains_casefold(file_path, keyword)
+            or _contains_casefold(doc_name, keyword)
         ):
             return True
 
@@ -117,6 +151,10 @@ def _match_keyword(item: dict[str, Any], keyword: str, normalized_keyword: str) 
             normalized_keyword in normalized_question
             or normalized_keyword in normalize_for_keyword(question)
             or normalized_keyword in normalize_for_keyword(answer)
+            or normalized_keyword in normalize_for_keyword(file_name)
+            or normalized_keyword in normalize_for_keyword(saved_file_name)
+            or normalized_keyword in normalize_for_keyword(file_path)
+            or normalized_keyword in normalize_for_keyword(doc_name)
         ):
             return True
 
@@ -630,6 +668,45 @@ def _decode_base64_file(file_content_base64: str) -> bytes:
         raise HTTPException(status_code=422, detail="文件内容不是合法base64") from exc
 
 
+def _normalize_upload_file_name(file_name: str) -> str:
+    base = _basename_from_path(file_name)
+    if not base:
+        raise HTTPException(status_code=422, detail="file_name不能为空")
+    clean = base.replace("\x00", "").strip()
+    if not clean:
+        raise HTTPException(status_code=422, detail="file_name不能为空")
+    return clean
+
+
+def save_uploaded_image_to_picture(file_name: str, file_content_base64: str) -> dict[str, Any]:
+    clean_file_name = _normalize_upload_file_name(file_name)
+    if not _is_image_file_name(clean_file_name):
+        raise HTTPException(status_code=422, detail="仅支持图片文件上传")
+
+    file_bytes = _decode_base64_file(file_content_base64)
+    if not file_bytes:
+        raise HTTPException(status_code=422, detail="图片内容不能为空")
+
+    # 保持原始文件名（不再追加UUID），便于按文件名关键词命中。
+    stored_name = clean_file_name
+    relative_path = f"/picture/{stored_name}"
+    save_path = PICTURE_DIR / stored_name
+
+    try:
+        PICTURE_DIR.mkdir(parents=True, exist_ok=True)
+        save_path.write_bytes(file_bytes)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"保存图片失败: {exc}") from exc
+
+    return {
+        "saved": True,
+        "file_name": clean_file_name,
+        "stored_file_name": stored_name,
+        "file_path": relative_path,
+        "bytes": len(file_bytes),
+    }
+
+
 def _decode_text_file_bytes(file_bytes: bytes) -> str:
     for encoding in ("utf-8-sig", "utf-8", "gb18030"):
         try:
@@ -855,6 +932,517 @@ def parse_batch_entries(raw_content: str) -> list[dict[str, str]]:
     if not entries:
         raise HTTPException(status_code=422, detail="未解析到有效数据")
     return [{"question": item["question"], "answer": item["answer"]} for item in entries]
+
+
+def _parse_docx_text(file_bytes: bytes) -> str:
+    try:
+        with zipfile.ZipFile(BytesIO(file_bytes)) as zip_file:
+            raw = zip_file.read("word/document.xml")
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=422, detail="docx文件损坏或格式错误") from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=f"docx文件结构错误: {exc}") from exc
+
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise HTTPException(status_code=422, detail=f"docx解析失败: {exc}") from exc
+
+    lines: list[str] = []
+    for p in root.findall(".//w:body/w:p", ns):
+        parts: list[str] = []
+        for node in p.findall(".//w:t", ns):
+            if node.text:
+                parts.append(node.text)
+        line = "".join(parts).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _parse_xlsx_text(file_bytes: bytes) -> str:
+    rows = _parse_xlsx_rows(file_bytes)
+    lines: list[str] = []
+    for _, row_values in rows:
+        values = [str(item).strip() for item in row_values if str(item).strip()]
+        if values:
+            lines.append("\t".join(values))
+    return "\n".join(lines).strip()
+
+
+def _normalize_document_text(raw_text: str) -> str:
+    text = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    normalized_lines: list[str] = []
+    previous_blank = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        if line:
+            normalized_lines.append(line)
+            previous_blank = False
+            continue
+        if not previous_blank:
+            normalized_lines.append("")
+        previous_blank = True
+    return "\n".join(normalized_lines).strip()
+
+
+def _is_image_file_name(file_name: str) -> bool:
+    lower_name = str(file_name or "").strip().lower()
+    return any(lower_name.endswith(ext) for ext in IMAGE_EXTENSIONS)
+
+
+def _basename_from_path(path_text: str) -> str:
+    text = str(path_text or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    return text.split("/")[-1].strip()
+
+
+def _extract_vector_size_from_collection_info(collection_info: dict[str, Any] | None) -> int | None:
+    if not isinstance(collection_info, dict):
+        return None
+    vectors = (
+        collection_info.get("result", {})
+        .get("config", {})
+        .get("params", {})
+        .get("vectors")
+    )
+    if isinstance(vectors, dict):
+        size = vectors.get("size")
+        if isinstance(size, int) and size > 0:
+            return size
+    return None
+
+
+def _get_collection_info_or_none(collection_name: str) -> dict[str, Any] | None:
+    info_url = f"{SETTINGS.qdrant_url}/collections/{collection_name}"
+    try:
+        return request_json(
+            url=info_url,
+            body=None,
+            timeout=SETTINGS.qdrant_timeout_seconds,
+            method="GET",
+        )
+    except HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise HTTPException(status_code=503, detail=http_error_detail("读取Qdrant集合失败", exc)) from exc
+    except (URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail=f"读取Qdrant集合失败: {exc}") from exc
+
+
+def _resolve_docs_vector_size(default_size: int = 1024) -> int:
+    docs_info = _get_collection_info_or_none(DOCS_COLLECTION_NAME)
+    docs_size = _extract_vector_size_from_collection_info(docs_info)
+    if isinstance(docs_size, int) and docs_size > 0:
+        return docs_size
+
+    return default_size
+
+
+def _extract_document_text(
+    content: str = "",
+    file_name: str = "",
+    file_content_base64: str = "",
+) -> tuple[str, str, str]:
+    has_file = bool((file_content_base64 or "").strip())
+    has_content = bool((content or "").strip())
+    if not has_file and not has_content:
+        raise HTTPException(status_code=422, detail="请上传文件或粘贴文本内容")
+
+    if not has_file:
+        return "text", "manual_text", _normalize_document_text(content)
+
+    source_name = (file_name or "").strip() or "upload"
+    lower_name = source_name.lower()
+    file_bytes = _decode_base64_file(file_content_base64)
+    source_type = "text"
+
+    if lower_name.endswith(".docx"):
+        source_type = "docx"
+        text = _parse_docx_text(file_bytes)
+    elif lower_name.endswith(".xlsx"):
+        source_type = "xlsx"
+        text = _parse_xlsx_text(file_bytes)
+    elif lower_name.endswith(".json"):
+        source_type = "json"
+        decoded = _decode_text_file_bytes(file_bytes)
+        try:
+            parsed = json.loads(decoded)
+        except json.JSONDecodeError:
+            text = decoded
+        else:
+            text = json.dumps(parsed, ensure_ascii=False, indent=2)
+    elif lower_name.endswith(".jsonl"):
+        source_type = "jsonl"
+        text = _decode_text_file_bytes(file_bytes)
+    elif lower_name.endswith(".csv"):
+        source_type = "csv"
+        text = _decode_text_file_bytes(file_bytes)
+    elif lower_name.endswith(".md") or lower_name.endswith(".markdown"):
+        source_type = "markdown"
+        text = _decode_text_file_bytes(file_bytes)
+    elif lower_name.endswith(".txt"):
+        source_type = "txt"
+        text = _decode_text_file_bytes(file_bytes)
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="文件类型不支持，仅支持 .txt/.md/.markdown/.csv/.json/.jsonl/.docx/.xlsx",
+        )
+
+    normalized_text = _normalize_document_text(text)
+    if not normalized_text:
+        raise HTTPException(status_code=422, detail="文件中没有可切片的有效文本")
+    return source_type, source_name, normalized_text
+
+
+def _coerce_chunk_params(chunk_size: int, chunk_overlap: int) -> tuple[int, int]:
+    safe_chunk_size = max(int(chunk_size), 100)
+    safe_chunk_size = min(safe_chunk_size, 1200)
+    safe_chunk_overlap = max(int(chunk_overlap), 0)
+    safe_chunk_overlap = min(safe_chunk_overlap, 300)
+    max_overlap = max(safe_chunk_size - 1, 0)
+    if safe_chunk_overlap >= safe_chunk_size:
+        safe_chunk_overlap = max_overlap
+    return safe_chunk_size, safe_chunk_overlap
+
+
+def _smart_split_end(text: str, start: int, hard_end: int) -> int:
+    if hard_end >= len(text):
+        return len(text)
+    min_end = start + max(20, int((hard_end - start) * 0.55))
+    if min_end >= hard_end:
+        return hard_end
+
+    for sep in ("\n\n", "\n", "。", "！", "？", "；", ". ", "! ", "? ", "; ", "，", ",", " "):
+        idx = text.rfind(sep, min_end, hard_end)
+        if idx >= min_end:
+            return idx + len(sep)
+    return hard_end
+
+
+def split_document_chunks(raw_text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    text = _normalize_document_text(raw_text)
+    if not text:
+        return []
+
+    safe_chunk_size, safe_chunk_overlap = _coerce_chunk_params(chunk_size, chunk_overlap)
+    if len(text) <= safe_chunk_size:
+        return [text]
+
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        hard_end = min(start + safe_chunk_size, len(text))
+        end = _smart_split_end(text, start, hard_end)
+        if end <= start:
+            end = hard_end
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(text):
+            break
+        start = max(end - safe_chunk_overlap, start + 1)
+    return chunks
+
+
+def _build_doc_chunk_entries(
+    *,
+    source_name: str,
+    source_type: str,
+    chunks: list[str],
+    chunk_size: int,
+    chunk_overlap: int,
+) -> list[dict[str, Any]]:
+    total = len(chunks)
+    file_name = _basename_from_path(source_name)
+    entries: list[dict[str, Any]] = []
+    for idx, chunk_text in enumerate(chunks, start=1):
+        title = f"{source_name}#{idx}/{total}"
+        entries.append(
+            {
+                "question": title,
+                "answer": chunk_text,
+                "chunk_text": chunk_text,
+                "is_image": False,
+                "extra_payload": {
+                    "doc_name": source_name,
+                    "file_name": file_name,
+                    "file_path": source_name,
+                    "doc_type": source_type,
+                    "is_image": False,
+                    "chunk_index": idx,
+                    "chunk_total": total,
+                    "chunk_chars": len(chunk_text),
+                    "chunk_size": chunk_size,
+                    "chunk_overlap": chunk_overlap,
+                },
+            }
+        )
+    return entries
+
+
+def _build_image_doc_entry(
+    *,
+    source_name: str,
+    image_path: str,
+) -> dict[str, Any]:
+    clean_path = image_path.strip() or source_name
+    original_name = _basename_from_path(source_name) or _basename_from_path(clean_path) or "image"
+    saved_name = _basename_from_path(clean_path) or original_name
+    return {
+        "question": original_name,
+        "answer": clean_path,
+        "chunk_text": original_name,
+        "is_image": True,
+        "extra_payload": {
+            "doc_name": source_name,
+            "file_name": original_name,
+            "saved_file_name": saved_name,
+            "file_path": clean_path,
+            "doc_type": "image",
+            "is_image": True,
+            "chunk_index": 1,
+            "chunk_total": 1,
+            "chunk_chars": len(clean_path),
+            "chunk_size": 0,
+            "chunk_overlap": 0,
+        },
+    }
+
+
+def _prepare_docs_chunk_entries(
+    *,
+    content: str,
+    file_name: str,
+    file_content_base64: str,
+    image_path: str,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> dict[str, Any]:
+    has_file = bool((file_content_base64 or "").strip())
+    clean_content = str(content or "").strip()
+    clean_image_path = str(image_path or "").strip()
+    if not has_file and not clean_content and clean_image_path:
+        source_name = _basename_from_path(clean_image_path) or "image_path"
+        image_entry = _build_image_doc_entry(
+            source_name=source_name,
+            image_path=clean_image_path,
+        )
+        return {
+            "source_type": "image",
+            "source_name": source_name,
+            "source_chars": 0,
+            "chunk_size": 0,
+            "chunk_overlap": 0,
+            "chunks": [str(image_entry.get("answer", "")).strip()],
+            "entries": [image_entry],
+            "is_image": True,
+        }
+
+    if has_file and _is_image_file_name(file_name):
+        source_name = (file_name or "").strip() or "upload_image"
+        image_entry = _build_image_doc_entry(
+            source_name=source_name,
+            image_path=clean_image_path,
+        )
+        return {
+            "source_type": "image",
+            "source_name": source_name,
+            "source_chars": 0,
+            "chunk_size": 0,
+            "chunk_overlap": 0,
+            "chunks": [str(image_entry.get("answer", "")).strip()],
+            "entries": [image_entry],
+            "is_image": True,
+        }
+
+    source_type, source_name, text = _extract_document_text(
+        content=clean_content,
+        file_name=file_name,
+        file_content_base64=file_content_base64,
+    )
+    safe_chunk_size, safe_chunk_overlap = _coerce_chunk_params(chunk_size, chunk_overlap)
+    chunks = split_document_chunks(text, safe_chunk_size, safe_chunk_overlap)
+    if not chunks:
+        raise HTTPException(status_code=422, detail="文本切片结果为空，请检查文件内容")
+
+    entries = _build_doc_chunk_entries(
+        source_name=source_name,
+        source_type=source_type,
+        chunks=chunks,
+        chunk_size=safe_chunk_size,
+        chunk_overlap=safe_chunk_overlap,
+    )
+    return {
+        "source_type": source_type,
+        "source_name": source_name,
+        "source_chars": len(text),
+        "chunk_size": safe_chunk_size,
+        "chunk_overlap": safe_chunk_overlap,
+        "chunks": chunks,
+        "entries": entries,
+        "is_image": False,
+    }
+
+
+def preview_docs_chunk_import(
+    *,
+    content: str = "",
+    file_name: str = "",
+    file_content_base64: str = "",
+    image_path: str = "",
+    chunk_size: int = 300,
+    chunk_overlap: int = 60,
+    max_preview: int = 20,
+) -> dict[str, Any]:
+    prepared = _prepare_docs_chunk_entries(
+        content=content,
+        file_name=file_name,
+        file_content_base64=file_content_base64,
+        image_path=image_path,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    chunks = prepared["chunks"]
+
+    preview_limit = max(1, min(int(max_preview), 50))
+    preview_chunks = [
+        {
+            "index": idx,
+            "chars": len(chunk),
+            "preview": chunk[:180],
+        }
+        for idx, chunk in enumerate(chunks[:preview_limit], start=1)
+    ]
+    return {
+        "collection": DOCS_COLLECTION_NAME,
+        "source_type": prepared["source_type"],
+        "file_name": prepared["source_name"],
+        "source_chars": prepared["source_chars"],
+        "chunk_size": prepared["chunk_size"],
+        "chunk_overlap": prepared["chunk_overlap"],
+        "total_chunks": len(chunks),
+        "preview_chunks": preview_chunks,
+        "preview_limit": preview_limit,
+        "preview_truncated": len(chunks) > preview_limit,
+        "is_image": prepared["is_image"],
+    }
+
+
+def import_docs_chunk_entries(
+    *,
+    content: str = "",
+    file_name: str = "",
+    file_content_base64: str = "",
+    image_path: str = "",
+    chunk_size: int = 300,
+    chunk_overlap: int = 60,
+    rollback_on_error: bool = True,
+) -> dict[str, Any]:
+    prepared = _prepare_docs_chunk_entries(
+        content=content,
+        file_name=file_name,
+        file_content_base64=file_content_base64,
+        image_path=image_path,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    entries = prepared["entries"]
+    docs_vector_size = _resolve_docs_vector_size()
+
+    success_items: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    inserted_ids: list[str] = []
+    rollback_error = ""
+    rolled_back = False
+    attempted = 0
+
+    for idx, entry in enumerate(entries, start=1):
+        attempted = idx
+        chunk_text = str(entry.get("chunk_text", "")).strip()
+        is_image_entry = bool(entry.get("is_image", False))
+        try:
+            if is_image_entry:
+                ensure_collection_ready(
+                    docs_vector_size,
+                    collection_name=DOCS_COLLECTION_NAME,
+                )
+                vector = [0.0] * docs_vector_size
+            else:
+                vector = build_query_embedding(chunk_text)
+            result = create_knowledge_point(
+                question=entry["question"],
+                answer=entry["answer"],
+                collection_name=DOCS_COLLECTION_NAME,
+                vector_override=vector,
+                extra_payload=entry.get("extra_payload") or {},
+            )
+            point_id = str(result.get("id", "")).strip()
+            if point_id:
+                inserted_ids.append(point_id)
+            success_items.append(
+                {
+                    "index": idx,
+                    "id": result.get("id"),
+                    "chunk_chars": len(chunk_text),
+                    "is_image": is_image_entry,
+                    "question": entry["question"],
+                }
+            )
+        except HTTPException as exc:
+            errors.append(
+                {
+                    "index": idx,
+                    "question": entry["question"],
+                    "error": str(exc.detail),
+                }
+            )
+            if rollback_on_error:
+                if inserted_ids:
+                    try:
+                        batch_delete_knowledge_points(
+                            inserted_ids,
+                            collection_name=DOCS_COLLECTION_NAME,
+                        )
+                        rolled_back = True
+                        success_items = []
+                        inserted_ids = []
+                    except HTTPException as rollback_exc:
+                        rollback_error = str(rollback_exc.detail)
+                break
+
+    total = len(entries)
+    skipped = max(total - attempted, 0)
+    if rolled_back:
+        success_count = 0
+        failed_count = total
+    else:
+        success_count = len(success_items)
+        failed_count = len(errors)
+
+    return {
+        "collection": DOCS_COLLECTION_NAME,
+        "source_type": prepared["source_type"],
+        "file_name": prepared["source_name"],
+        "source_chars": prepared["source_chars"],
+        "chunk_size": prepared["chunk_size"],
+        "chunk_overlap": prepared["chunk_overlap"],
+        "total_chunks": total,
+        "attempted": attempted,
+        "skipped": skipped,
+        "success": success_count,
+        "failed": failed_count,
+        "items": success_items,
+        "errors": errors,
+        "rollback_on_error": rollback_on_error,
+        "rolled_back": rolled_back,
+        "rollback_error": rollback_error,
+        "is_image": prepared["is_image"],
+    }
 
 
 def preview_batch_knowledge(
