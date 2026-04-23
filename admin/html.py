@@ -600,7 +600,19 @@ def dashboard_page_html(
         </section>
 
         <section class="card">
-          <label>分割类型</label>
+          <label style="margin-top:10px;">分段分隔符</label>
+          <div class="doc-mode-group">
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="newline" checked /><span>换行符</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="double_newline" /><span>两个换行符</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="page_break" /><span>分页符</span></label>
+            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="custom" /><span>自定义分隔符</span></label>
+          </div>
+          <div id="docChunkCustomDelimiterPanel" style="margin-top:10px; display:none;">
+            <label for="docChunkCustomDelimiter">自定义分隔符（最多20字符）</label>
+            <input id="docChunkCustomDelimiter" type="text" maxlength="20" placeholder="请输入分隔符，例如 ###" />
+          </div>
+
+          <label style="margin-top:16px;">分割类型</label>
           <div class="doc-mode-group">
             <label class="doc-mode-item"><input type="radio" name="docChunkSourceMode" value="text" checked /><span>文本</span></label>
             <label class="doc-mode-item"><input type="radio" name="docChunkSourceMode" value="file" /><span>文件</span></label>
@@ -645,18 +657,6 @@ def dashboard_page_html(
               <label for="docChunkOverlap">切片重叠（0~300）</label>
               <input id="docChunkOverlap" type="number" min="0" max="300" step="1" value="60" />
             </div>
-          </div>
-
-          <label style="margin-top:10px;">分段分隔符</label>
-          <div class="doc-mode-group">
-            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="newline" checked /><span>换行符</span></label>
-            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="double_newline" /><span>两个换行符</span></label>
-            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="page_break" /><span>分页符</span></label>
-            <label class="doc-mode-item"><input type="radio" name="docChunkDelimiterMode" value="custom" /><span>自定义分隔符</span></label>
-          </div>
-          <div id="docChunkCustomDelimiterPanel" style="margin-top:10px; display:none;">
-            <label for="docChunkCustomDelimiter">自定义分隔符（最多20字符）</label>
-            <input id="docChunkCustomDelimiter" type="text" maxlength="20" placeholder="请输入分隔符，例如 ###" />
           </div>
 
           <div class="switch-row">

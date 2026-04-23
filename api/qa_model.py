@@ -48,7 +48,7 @@ def _build_fragmented_data(content: str, runtime: AppSettings) -> str:
             collection_name=runtime.qdrant_docs_collection,
         )
     except Exception as exc:
-        print(f"[qa_model] fragmenteddata retrieve failed: {type(exc).__name__}: {exc}", flush=True)
+        #print(f"[qa_model] fragmenteddata retrieve failed: {type(exc).__name__}: {exc}", flush=True)
         return ""
 
     filtered_hits: list[dict[str, object]] = []
@@ -152,5 +152,5 @@ def ask_qa_model(content: str, runtime: AppSettings) -> str:
     if not answer:
         raise HTTPException(status_code=502, detail="问答模型响应格式异常: 缺少有效文本")
     elapsed = monotonic() - start_time
-    print(f"[qa_model] success elapsed={elapsed:.2f}s answer_chars={len(answer)}", flush=True)
+    #print(f"[qa_model] success elapsed={elapsed:.2f}s answer_chars={len(answer)}", flush=True)
     return answer
