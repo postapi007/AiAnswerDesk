@@ -114,9 +114,18 @@ curl "http://127.0.0.1:8000/api/?content=怎么退款"
 * 后台地址：`http://127.0.0.1:6333/dashboard`
 * 知识库集合名（表名）：`faq`（来自 `config/app.json` 的 `qdrant.collection`）
 * 审核知识库集合名（表名）：`pending_kb`（来自 `config/app.json` 的 `qdrant.pending_collection`）
+* 分片知识库集合名（表名）：`kb_docs_v1`
 * http://127.0.0.1:6333/dashboard#/console  执行创建集合
 ```json
 PUT /collections/faq
+{
+  "vectors": {
+    "size": 1024,
+    "distance": "Cosine"
+  }
+}
+
+PUT /collections/kb_docs_v1
 {
   "vectors": {
     "size": 1024,
