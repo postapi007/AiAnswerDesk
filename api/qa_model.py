@@ -64,13 +64,13 @@ def _build_fragmented_data(content: str, runtime: AppSettings) -> str:
             break
 
     fragmented_data = _format_fragmented_data(filtered_hits)
-    print(
-        "[qa_model] fragmenteddata "
-        f"hits={len(filtered_hits)} "
-        f"threshold={runtime.fragment_read_similarity_threshold} "
-        f"limit={runtime.fragment_read_limit}",
-        flush=True,
-    )
+    # print(
+    #     "[qa_model] fragmenteddata "
+    #     f"hits={len(filtered_hits)} "
+    #     f"threshold={runtime.fragment_read_similarity_threshold} "
+    #     f"limit={runtime.fragment_read_limit}",
+    #     flush=True,
+    # )
     return fragmented_data
 
 
@@ -125,6 +125,8 @@ def ask_qa_model(content: str, runtime: AppSettings) -> str:
     if "{fragmenteddata}" in base_template:
         fragmented_data = _build_fragmented_data(content, runtime)
     prompt = _render_qa_prompt(base_template, content, fragmented_data)
+    # print(f"[qa_model] request model={runtime.qa_model} base_url={runtime.qa_base_url}", flush=True)
+    # print(f"[qa_model] request_prompt_start\n{prompt}\n[qa_model] request_prompt_end", flush=True)
     start_time = monotonic()
 
     try:
