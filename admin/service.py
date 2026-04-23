@@ -581,12 +581,14 @@ def list_knowledge_points(
     }
 
 
-def test_docs_chunk_similarity(content: str, limit: int = 50) -> dict[str, Any]:
+def test_docs_chunk_similarity(content: str) -> dict[str, Any]:
     clean_content = content.strip()
     if not clean_content:
         raise HTTPException(status_code=422, detail="content 不能为空")
 
-    safe_limit = max(1, min(int(limit), 50))
+    runtime = load_settings(CONFIG_FILE_PATH)
+    safe_limit = max(1, min(int(runtime.fragment_read_limit), 10))
+    similarity_threshold = float(runtime.fragment_read_similarity_threshold)
     query_vector = build_query_embedding(clean_content)
     raw_hits = retrieve_from_qdrant(
         query_vector=query_vector,
@@ -609,25 +611,27 @@ def test_docs_chunk_similarity(content: str, limit: int = 50) -> dict[str, Any]:
         if not file_name:
             file_name = doc_name or str(hit.get("question", "")).strip()
 
-        items.append(
-            {
-                "id": hit.get("id"),
-                "question": str(hit.get("question", "")).strip(),
-                "answer": str(hit.get("answer", "")).strip(),
-                "file_name": file_name,
-                "doc_name": doc_name,
-                "file_path": file_path,
-                "doc_type": str(hit.get("doc_type", "")).strip(),
-                "is_image": bool(hit.get("is_image", False)),
-                "score": score,
-            }
-        )
+        if score >= similarity_threshold:
+            items.append(
+                {
+                    "id": hit.get("id"),
+                    "question": str(hit.get("question", "")).strip(),
+                    "answer": str(hit.get("answer", "")).strip(),
+                    "file_name": file_name,
+                    "doc_name": doc_name,
+                    "file_path": file_path,
+                    "doc_type": str(hit.get("doc_type", "")).strip(),
+                    "is_image": bool(hit.get("is_image", False)),
+                    "score": score,
+                }
+            )
 
     total = len(items)
     return {
         "collection": DOCS_COLLECTION_NAME,
         "content": clean_content,
         "limit": safe_limit,
+        "similarity_threshold": similarity_threshold,
         "page": 1,
         "total_pages": 1,
         "has_prev": False,

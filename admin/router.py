@@ -277,10 +277,9 @@ def admin_docs_chunk_upload_image(request: Request, payload: AdminUploadImageReq
 def admin_docs_chunk_similarity(
     request: Request,
     content: str = Query(..., description="测试内容"),
-    limit: int = Query(50, ge=1, le=50, description="最多返回条数"),
 ):
     require_admin(request)
-    return test_docs_chunk_similarity(content=content, limit=limit)
+    return test_docs_chunk_similarity(content=content)
 
 
 @router.post("/admin/api/knowledge/batch-delete")

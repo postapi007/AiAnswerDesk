@@ -1434,16 +1434,19 @@ def dashboard_page_html(
       docSelectedIds.clear();
       try {
         const query = new URLSearchParams({
-          content: keyword,
-          limit: "50"
+          content: keyword
         });
         const data = await apiRequest("GET", `/admin/api/docs-chunk/similarity?${query.toString()}`);
         if (!data) return;
         const items = data.items || [];
         const total = Number(data.total || items.length || 0);
+        const usedThreshold = Number(data.similarity_threshold);
+        const usedLimit = Number(data.limit);
         renderDocChunkTable(items);
         updateDocPager(total, 1, 1);
-        setStatus("docTableStatus", `向量相似度测试完成：命中 ${items.length} 条`, true);
+        const thresholdText = Number.isFinite(usedThreshold) ? usedThreshold : "-";
+        const limitText = Number.isFinite(usedLimit) ? usedLimit : "-";
+        setStatus("docTableStatus", `向量相似度测试完成：命中 ${items.length} 条（阈值 ${thresholdText}，条数 ${limitText}）`, true);
       } catch (err) {
         setStatus("docTableStatus", err.message || "向量相似度测试失败", false);
       }

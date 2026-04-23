@@ -29,7 +29,7 @@
   },
   "fragment_read": {
     "similarity_threshold": 0.22, // 分片读取相似度阈值（0~1）
-    "limit": 5 // 分片读取返回条数（1~10）
+    "limit": 10 // 分片读取返回条数（1~10）
   },
   "web": {
     "enabled": true, // 是否启用Web应答界面（false时关闭 /web）
