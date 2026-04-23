@@ -362,6 +362,25 @@ def dashboard_page_html(
       font-size: 12px;
       line-height: 1.6;
     }
+    .file-upload-row {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .file-upload-name {
+      max-width: min(560px, 74vw);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #f8fafc;
+    }
     .preview-box {
       margin-top: 10px;
       border: 1px dashed var(--line);
@@ -505,11 +524,27 @@ def dashboard_page_html(
               txt格式：每行 `问题|答案` 或 `问题[TAB]答案`<br />
               xlsx格式：默认读取第1个工作表，按前两列（问题、答案）解析（可有表头）
             </p>
-            <label for="batchFileInput">上传文件（.xlsx / .txt）</label>
-            <input id="batchFileInput" type="file" accept=".xlsx,.txt" />
-            <div class="file-hint">如果上传了文件，优先读取文件；否则读取下方文本内容。</div>
-            <label for="batchContent" style="margin-top:8px;">或粘贴txt内容</label>
-            <textarea id="batchContent" placeholder="怎么退款|退款需要7个工作日&#10;多久到账|预计3-7个工作日"></textarea>
+            <label>分割类型</label>
+            <div class="doc-mode-group">
+              <label class="doc-mode-item"><input type="radio" name="batchSourceMode" value="text" checked /><span>文本</span></label>
+              <label class="doc-mode-item"><input type="radio" name="batchSourceMode" value="file" /><span>上传文件</span></label>
+            </div>
+
+            <div id="batchModeTextPanel" style="margin-top:8px;">
+              <label for="batchContent">粘贴txt内容</label>
+              <textarea id="batchContent" placeholder="怎么退款|退款需要7个工作日&#10;多久到账|预计3-7个工作日"></textarea>
+            </div>
+
+            <div id="batchModeFilePanel" style="margin-top:8px; display:none;">
+              <label for="batchFileInput">上传文件（.xlsx / .txt）</label>
+              <div class="file-upload-row">
+                <button class="btn" id="batchPickFileBtn" type="button">选择文件</button>
+                <span class="file-upload-name" id="batchFileName">未选择文件</span>
+              </div>
+              <input id="batchFileInput" type="file" accept=".xlsx,.txt" style="display:none;" />
+              <div class="file-hint">支持 .xlsx 和 .txt 文件</div>
+            </div>
+
             <div class="switch-row">
               <input id="batchRollbackOnError" type="checkbox" checked />
               <label for="batchRollbackOnError" style="margin:0;">导入出错时回滚已写入数据</label>
@@ -920,6 +955,34 @@ def dashboard_page_html(
       if (box) box.style.display = "none";
       if (summary) summary.textContent = "";
       if (errors) errors.textContent = "";
+    }
+
+    function getBatchSourceMode() {
+      const selected = document.querySelector('input[name="batchSourceMode"]:checked');
+      const value = selected ? String(selected.value || "").trim() : "text";
+      return value || "text";
+    }
+
+    function updateBatchSourceModeUi() {
+      const mode = getBatchSourceMode();
+      const textPanel = document.getElementById("batchModeTextPanel");
+      const filePanel = document.getElementById("batchModeFilePanel");
+      if (textPanel) textPanel.style.display = mode === "text" ? "" : "none";
+      if (filePanel) filePanel.style.display = mode === "file" ? "" : "none";
+      clearBatchPreview();
+    }
+
+    function updateBatchFileName() {
+      const fileInput = document.getElementById("batchFileInput");
+      const file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+      const fileNameEl = document.getElementById("batchFileName");
+      if (!fileNameEl) return;
+      fileNameEl.textContent = file ? String(file.name || "").trim() : "未选择文件";
+    }
+
+    function chooseBatchFile() {
+      const fileInput = document.getElementById("batchFileInput");
+      if (fileInput) fileInput.click();
     }
 
     function renderBatchPreview(data) {
@@ -1756,17 +1819,17 @@ def dashboard_page_html(
       const content = document.getElementById("batchContent").value || "";
       const fileInput = document.getElementById("batchFileInput");
       const file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
-
-      if (!file && !content.trim()) {
-        setStatus("batchStatus", "请上传xlsx/txt文件或粘贴批量内容", false);
-        return;
-      }
+      const sourceMode = getBatchSourceMode();
 
       setStatus("batchStatus", "预览中...", true);
       clearBatchPreview();
       try {
         const body = { max_preview: 30 };
-        if (file) {
+        if (sourceMode === "file") {
+          if (!file) {
+            setStatus("batchStatus", "请先选择xlsx/txt文件", false);
+            return;
+          }
           const fileName = String(file.name || "").trim();
           const lower = fileName.toLowerCase();
           if (!(lower.endsWith(".xlsx") || lower.endsWith(".txt"))) {
@@ -1776,6 +1839,10 @@ def dashboard_page_html(
           body.file_name = fileName;
           body.file_content_base64 = await readFileAsBase64(file);
         } else {
+          if (!content.trim()) {
+            setStatus("batchStatus", "请先粘贴批量内容", false);
+            return;
+          }
           body.content = content;
         }
 
@@ -1830,7 +1897,14 @@ def dashboard_page_html(
     document.getElementById("addBtn").addEventListener("click", addSingle);
     document.getElementById("previewBatchBtn").addEventListener("click", previewBatchImport);
     document.getElementById("batchBtn").addEventListener("click", batchImport);
-    document.getElementById("batchFileInput").addEventListener("change", clearBatchPreview);
+    document.getElementById("batchPickFileBtn").addEventListener("click", chooseBatchFile);
+    document.getElementById("batchFileInput").addEventListener("change", () => {
+      updateBatchFileName();
+      clearBatchPreview();
+    });
+    document.querySelectorAll('input[name="batchSourceMode"]').forEach((el) => {
+      el.addEventListener("change", updateBatchSourceModeUi);
+    });
     document.getElementById("batchContent").addEventListener("input", clearBatchPreview);
     document.getElementById("menuConsole").addEventListener("click", () => switchView("console"));
     document.getElementById("menuKnowledge").addEventListener("click", () => switchView("knowledge"));
@@ -1930,6 +2004,8 @@ def dashboard_page_html(
       updateSelectAllState();
     });
 
+    updateBatchFileName();
+    updateBatchSourceModeUi();
     updateDocImageUploadResult();
     updateDocChunkSourceModeUi();
     switchView(getActiveView());
